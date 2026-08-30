@@ -38,7 +38,7 @@ export async function signIn(email, password) {
     return { ok: true };
   } catch (e) {
     console.error("signIn error:", e);
-    return { ok: false, error: "Errore di accesso: " + (e.message || String(e)) };
+    return { ok: false, error: "Non è stato possibile accedere. Riprova tra poco." };
   }
 }
 
@@ -49,7 +49,7 @@ export async function signUpAdmin(email, password) {
     return { ok: true };
   } catch (e) {
     console.error("signUpAdmin error:", e);
-    return { ok: false, error: "Errore nella creazione dell'account: " + (e.message || String(e)) };
+    return { ok: false, error: "Non è stato possibile creare l'account. Riprova tra poco." };
   }
 }
 
@@ -80,15 +80,20 @@ export async function signUpClient({
       },
     ]);
     if (error) {
+      console.error("signUpClient insert clients error:", error);
       return {
         ok: false,
-        error: "Account creato ma non ho potuto salvare il profilo: " + error.message,
+        error:
+          "Il tuo account è stato creato, ma c'è stato un problema nel salvare i dati della struttura. Riprova tra poco o contatta la lavanderia.",
       };
     }
     return { ok: true };
   } catch (e) {
     console.error("signUpClient error:", e);
-    return { ok: false, error: "Errore nella registrazione: " + (e.message || String(e)) };
+    return {
+      ok: false,
+      error: "Non è stato possibile completare la registrazione. Riprova tra poco.",
+    };
   }
 }
 

@@ -103,7 +103,7 @@ export async function fetchAll() {
   const [catalogRes, clientsRes, ordersRes, notifRes, staffRes] = await Promise.all([
     neon.from("catalog_items").select("*").order("category"),
     neon.from("clients").select("*, client_pricing(item_id, price)"),
-    neon.from("orders").select("*, order_items(*), order_slots(*)"),
+    neon.from("orders").select("*, order_items(*), order_slots(*), order_messages(*)"),
     neon.from("notifications").select("*"),
     neon.from("staff").select("user_id"),
   ]);
@@ -151,6 +151,14 @@ export async function fetchAll() {
       date: s.slot_date,
       time: s.slot_time ? s.slot_time.slice(0, 5) : "",
     })),
+    messages: (o.order_messages || [])
+      .map((m) => ({
+        id: m.id,
+        sender: m.sender,
+        message: m.message,
+        createdAt: m.created_at,
+      }))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
   }));
 
   const notifications = (notifRes.data || []).map((n) => ({
@@ -234,10 +242,10 @@ export async function addNotification(clientId, message) {
 
 // ---------------- Ordini ----------------
 
-export async function createOrder({ clientId, items, total, preferredSlots }) {
+export async function createOrder({ clientId, items, total, preferredSlots, note }) {
   const { data, error } = await neon
     .from("orders")
-    .insert([{ client_id: clientId, total, status: "nuovo" }])
+    .insert([{ client_id: clientId, total, status: "nuovo", note: note || "" }])
     .select();
   if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione ordine");
   const orderId = data[0].id;
@@ -253,6 +261,31 @@ export async function createOrder({ clientId, items, total, preferredSlots }) {
   }
   await addNotification(clientId, `Il tuo ordine #${orderId} è stato ricevuto.`);
   return orderId;
+}
+
+export async function sendOrderMessage(orderId, sender, message) {
+  try {
+    const { error } = await neon
+      .from("order_messages")
+      .insert([{ order_id: orderId, sender, message }]);
+    if (error) {
+      console.error("sendOrderMessage error:", error);
+      return { ok: false, error: "Non ho potuto inviare il messaggio: " + error.message };
+    }
+    if (sender === "staff") {
+      const clientId = await getOrderClientId(orderId);
+      if (clientId) {
+        await addNotification(
+          clientId,
+          `La lavanderia ha una richiesta per il tuo ordine #${orderId}. Guarda i messaggi sull'ordine.`
+        );
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("sendOrderMessage error:", e);
+    return { ok: false, error: "Errore nell'invio del messaggio: " + (e.message || String(e)) };
+  }
 }
 
 export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime }) {

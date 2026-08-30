@@ -21,21 +21,36 @@ function translateAuthError(msg) {
 // ---------------- Autenticazione ----------------
 
 export async function getSession() {
-  const { data } = await neon.auth.getSession();
-  if (data && data.session && data.user) return data.user;
-  return null;
+  try {
+    const { data } = await neon.auth.getSession();
+    if (data && data.session && data.user) return data.user;
+    return null;
+  } catch (e) {
+    console.error("getSession error:", e);
+    return null;
+  }
 }
 
 export async function signIn(email, password) {
-  const res = await neon.auth.signIn.email({ email, password });
-  if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
-  return { ok: true };
+  try {
+    const res = await neon.auth.signIn.email({ email, password });
+    if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
+    return { ok: true };
+  } catch (e) {
+    console.error("signIn error:", e);
+    return { ok: false, error: "Errore di accesso: " + (e.message || String(e)) };
+  }
 }
 
 export async function signUpAdmin(email, password) {
-  const res = await neon.auth.signUp.email({ email, password, name: email });
-  if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
-  return { ok: true };
+  try {
+    const res = await neon.auth.signUp.email({ email, password, name: email });
+    if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
+    return { ok: true };
+  } catch (e) {
+    console.error("signUpAdmin error:", e);
+    return { ok: false, error: "Errore nella creazione dell'account: " + (e.message || String(e)) };
+  }
 }
 
 export async function signUpClient({
@@ -48,28 +63,33 @@ export async function signUpClient({
   billingVat,
   billingAddress,
 }) {
-  const signUpRes = await neon.auth.signUp.email({ email, password, name: businessName });
-  if (signUpRes.error) return { ok: false, error: translateAuthError(signUpRes.error.message) };
-  const userId = signUpRes.data.user.id;
-  const { error } = await neon.from("clients").insert([
-    {
-      user_id: userId,
-      name: businessName,
-      email,
-      phone,
-      delivery_address: deliveryAddress,
-      billing_name: billingName,
-      billing_vat: billingVat,
-      billing_address: billingAddress,
-    },
-  ]);
-  if (error) {
-    return {
-      ok: false,
-      error: "Account creato ma non ho potuto salvare il profilo: " + error.message,
-    };
+  try {
+    const signUpRes = await neon.auth.signUp.email({ email, password, name: businessName });
+    if (signUpRes.error) return { ok: false, error: translateAuthError(signUpRes.error.message) };
+    const userId = signUpRes.data.user.id;
+    const { error } = await neon.from("clients").insert([
+      {
+        user_id: userId,
+        name: businessName,
+        email,
+        phone,
+        delivery_address: deliveryAddress,
+        billing_name: billingName,
+        billing_vat: billingVat,
+        billing_address: billingAddress,
+      },
+    ]);
+    if (error) {
+      return {
+        ok: false,
+        error: "Account creato ma non ho potuto salvare il profilo: " + error.message,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("signUpClient error:", e);
+    return { ok: false, error: "Errore nella registrazione: " + (e.message || String(e)) };
   }
-  return { ok: true };
 }
 
 export async function signOut() {

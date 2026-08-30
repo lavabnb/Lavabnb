@@ -201,6 +201,31 @@ export async function completeProfile(clientId, fields) {
     .eq("id", clientId);
 }
 
+export async function createClientProfile(userId, email, fields) {
+  try {
+    const { error } = await neon.from("clients").insert([
+      {
+        user_id: userId,
+        name: fields.businessName,
+        email,
+        phone: fields.phone,
+        delivery_address: fields.deliveryAddress,
+        billing_name: fields.billingName,
+        billing_vat: fields.billingVat,
+        billing_address: fields.billingAddress,
+      },
+    ]);
+    if (error) {
+      console.error("createClientProfile error:", error);
+      return { ok: false, error: "Non ho potuto salvare il profilo: " + error.message };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("createClientProfile error:", e);
+    return { ok: false, error: "Errore nel salvare il profilo: " + (e.message || String(e)) };
+  }
+}
+
 // ---------------- Notifiche ----------------
 
 export async function addNotification(clientId, message) {

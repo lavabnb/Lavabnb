@@ -1567,7 +1567,8 @@ function AdminSignupForm({ onSubmit, onCancel }) {
       if (!res.ok) setError(res.error);
       else setDone(true);
     } catch (e) {
-      setError("Errore imprevisto: " + (e.message || String(e)));
+      console.error(e);
+      setError("Si è verificato un problema. Riprova tra poco.");
     } finally {
       setBusy(false);
     }
@@ -1660,7 +1661,8 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
       const res = await onLogin(loginEmail.trim(), loginPassword);
       if (!res.ok) setError(res.error);
     } catch (e) {
-      setError("Errore imprevisto: " + (e.message || String(e)));
+      console.error(e);
+      setError("Si è verificato un problema. Riprova tra poco.");
     } finally {
       setBusy(false);
     }
@@ -1696,7 +1698,8 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
       });
       if (!res.ok) setError(res.error);
     } catch (e) {
-      setError("Errore imprevisto: " + (e.message || String(e)));
+      console.error(e);
+      setError("Si è verificato un problema. Riprova tra poco.");
     } finally {
       setBusy(false);
     }
@@ -2203,7 +2206,7 @@ export default function App() {
         return { ok: true };
       } catch (e) {
         console.error("post-login error:", e);
-        return { ok: false, error: "Accesso riuscito ma errore nel caricare i dati: " + (e.message || String(e)) };
+        return { ok: false, error: "Accesso riuscito ma non è stato possibile caricare i dati. Riprova." };
       }
     },
     registerClient: async (fields) => {
@@ -2216,7 +2219,7 @@ export default function App() {
         return { ok: true };
       } catch (e) {
         console.error("post-register error:", e);
-        return { ok: false, error: "Account creato ma errore nel caricare i dati: " + (e.message || String(e)) };
+        return { ok: false, error: "Account creato ma non è stato possibile caricare i dati. Riprova ad accedere." };
       }
     },
     adminSignup: async (email, password) => {
@@ -2224,7 +2227,7 @@ export default function App() {
         return await api.signUpAdmin(email, password);
       } catch (e) {
         console.error("adminSignup error:", e);
-        return { ok: false, error: "Errore: " + (e.message || String(e)) };
+        return { ok: false, error: "Si è verificato un problema. Riprova tra poco." };
       }
     },
     logout: async () => {

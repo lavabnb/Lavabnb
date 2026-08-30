@@ -17,6 +17,7 @@ import {
   Check,
   Trash2,
   LogOut,
+  ChevronDown,
 } from "lucide-react";
 import * as api from "./api";
 
@@ -523,6 +524,7 @@ function OrderDetailAdminScreen({
   onMarkReady,
   onUnschedule,
   onDelete,
+  onSendMessage,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -601,6 +603,24 @@ function OrderDetailAdminScreen({
         rows={4}
         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm mb-6"
       />
+
+      {order.status !== "consegnato" && (
+        <button
+          onClick={() =>
+            onSendMessage(
+              order.id,
+              "staff",
+              "Vorremmo proporti una modifica a questo ordine (orario o quantità). Rispondici qui per metterci d'accordo."
+            )
+          }
+          className="w-full border border-amber-200 text-amber-700 bg-amber-50 rounded-xl py-2.5 text-sm font-semibold mb-3"
+        >
+          Richiedi modifica (orario/quantità)
+        </button>
+      )}
+      <OrderChat order={order} sender="staff" onSend={onSendMessage} />
+
+      <div className="mt-6" />
 
       {order.status === "nuovo" && (
         <button
@@ -1247,6 +1267,7 @@ function LavanderiaView({ data, actions }) {
               actions.deleteOrder(id);
               setDetailOrderId(null);
             }}
+            onSendMessage={actions.sendOrderMessage}
           />
         </div>
         <BottomNav
@@ -1340,6 +1361,8 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   const [category, setCategory] = useState(categories[0] || null);
   const [qty, setQty] = useState({});
   const [slots, setSlots] = useState([{ date: addDaysISO(isoToday(), 2), time: "09:00" }]);
+  const [showRecap, setShowRecap] = useState(false);
+  const [note, setNote] = useState("");
 
   if (categories.length === 0) {
     return (
@@ -1367,6 +1390,8 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   const removeSlot = (i) => setSlots((s) => s.filter((_, idx) => idx !== i));
   const validSlots = slots.filter((s) => isSlotValid(s.date, s.time));
   const hasInvalidSlot = slots.some((s) => !isSlotValid(s.date, s.time));
+  const selectedItems = allEnabled.filter((it) => (qty[it.id] || 0) > 0);
+  const HOUR_SLOTS = ["09:00", "10:00", "11:00", "12:00", "13:00"];
 
   return (
     <div className="flex flex-col h-full">
@@ -1419,29 +1444,55 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
           </div>
         ))}
 
+        <div className="border border-gray-200 rounded-2xl overflow-hidden mb-4">
+          <button
+            onClick={() => setShowRecap((s) => !s)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-gray-900"
+          >
+            <span>🧺 Riepilogo carrello ({itemCount} pezzi)</span>
+            <ChevronDown
+              size={16}
+              className={`transition-transform ${showRecap ? "rotate-180" : ""}`}
+            />
+          </button>
+          {showRecap && (
+            <div className="px-4 pb-4">
+              {selectedItems.length === 0 ? (
+                <p className="text-xs text-gray-400 py-1">Nessun capo selezionato ancora.</p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {selectedItems.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between py-2 text-sm">
+                      <span className="flex items-center gap-2 text-gray-700">
+                        <span>{CATEGORY_ICON[it.category]}</span>
+                        {it.name}
+                      </span>
+                      <span className="font-semibold text-gray-900">×{qty[it.id]}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="mt-2 mb-4">
           <div className="font-bold text-gray-900 mb-1">Quando preferisci la consegna?</div>
           <p className="text-xs text-gray-400 mb-3">
-            Indica uno o più orari possibili, con almeno 24 ore di anticipo. La lavanderia sceglierà
-            quello più adatto e non sarà modificabile dopo la conferma.
+            Indica una o più fasce orarie possibili (9:00–14:00), con almeno 24 ore di anticipo. La
+            lavanderia sceglierà quella più adatta e non sarà modificabile dopo la conferma.
           </p>
           {slots.map((s, i) => {
             const valid = isSlotValid(s.date, s.time);
             return (
-              <div key={i} className="mb-2">
-                <div className="flex gap-2 items-center">
+              <div key={i} className="mb-3">
+                <div className="flex gap-2 items-center mb-2">
                   <input
                     type="date"
                     value={s.date}
                     min={addDaysISO(isoToday(), 1)}
                     onChange={(e) => updateSlot(i, "date", e.target.value)}
                     className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                  />
-                  <input
-                    type="time"
-                    value={s.time}
-                    onChange={(e) => updateSlot(i, "time", e.target.value)}
-                    className="w-28 border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
                   />
                   {slots.length > 1 && (
                     <button
@@ -1451,6 +1502,24 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
                       <Trash2 size={14} />
                     </button>
                   )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {HOUR_SLOTS.map((h) => {
+                    const endHour = String(parseInt(h, 10) + 1).padStart(2, "0");
+                    return (
+                      <button
+                        key={h}
+                        onClick={() => updateSlot(i, "time", h)}
+                        className={`text-xs px-3 py-1.5 rounded-full border font-medium ${
+                          s.time === h
+                            ? "bg-gray-900 text-white border-gray-900"
+                            : "border-gray-300 text-gray-700"
+                        }`}
+                      >
+                        {h}–{endHour}:00
+                      </button>
+                    );
+                  })}
                 </div>
                 {!valid && (
                   <div className="text-xs text-rose-600 mt-1">
@@ -1464,8 +1533,22 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
             onClick={addSlot}
             className="text-sm font-semibold text-gray-600 flex items-center gap-1.5 mt-1"
           >
-            <Plus size={14} /> Aggiungi un altro orario
+            <Plus size={14} /> Aggiungi un'altra fascia oraria
           </button>
+        </div>
+
+        <div className="mb-4">
+          <div className="font-bold text-gray-900 mb-1">Note (facoltativo)</div>
+          <p className="text-xs text-gray-400 mb-2">
+            Specifica qui la tua disponibilità esatta, es. "disponibile solo dopo le 10:30".
+          </p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="Aggiungi eventuali note per la lavanderia..."
+            className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+          />
         </div>
       </div>
 
@@ -1485,7 +1568,7 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
                 qty: qty[it.id],
                 price: client.pricing[it.id],
               }));
-            onCreate({ items: orderItems, total, preferredSlots: validSlots });
+            onCreate({ items: orderItems, total, preferredSlots: validSlots, note: note.trim() });
           }}
           className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3.5 font-bold"
         >
@@ -1496,7 +1579,69 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   );
 }
 
-function ClienteOrderCard({ order }) {
+function OrderChat({ order, sender, onSend }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const messages = order.messages || [];
+
+  const submit = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    setError("");
+    const res = await onSend(order.id, sender, text.trim());
+    setBusy(false);
+    if (res && res.ok === false) setError(res.error);
+    else setText("");
+  };
+
+  return (
+    <div className="mt-3 border border-gray-200 rounded-xl p-3">
+      <div className="text-xs font-bold text-gray-500 mb-2">Messaggi sull'ordine</div>
+      {messages.length === 0 && (
+        <p className="text-xs text-gray-400 mb-2">Nessun messaggio ancora.</p>
+      )}
+      {messages.length > 0 && (
+        <div className="space-y-2 mb-3 max-h-56 overflow-y-auto">
+          {messages.map((m) => (
+            <div
+              key={m.id}
+              className={`text-sm rounded-lg px-3 py-2 max-w-[85%] ${
+                m.sender === sender ? "bg-gray-900 text-white ml-auto" : "bg-gray-100 text-gray-800"
+              }`}
+            >
+              {m.message}
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Scrivi un messaggio..."
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+        />
+        <button
+          disabled={busy}
+          onClick={submit}
+          className="bg-gray-900 disabled:bg-gray-300 text-white rounded-lg px-4 text-sm font-semibold"
+        >
+          Invia
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClienteOrderCard({ order, onSendMessage }) {
+  const [showChat, setShowChat] = useState(false);
+  const messages = order.messages || [];
+  const lastMsg = messages[messages.length - 1];
+  const hasStaffPing = lastMsg && lastMsg.sender === "staff";
+
   return (
     <div className="border border-gray-200 rounded-2xl p-5 mb-4">
       <div className="flex items-center justify-between">
@@ -1511,15 +1656,41 @@ function ClienteOrderCard({ order }) {
       <div className="mt-3">
         <StatusDot status={order.status} />
       </div>
-      <div className="mt-3 bg-gray-50 text-sm text-gray-600 rounded-xl p-3">
-        {order.status === "nuovo" && "Il tuo ordine è stato ricevuto e verrà lavorato a breve."}
-        {order.status === "pronto" &&
-          "Il tuo ordine è pronto ed è in attesa di essere programmato per la consegna."}
-        {order.status === "programmato" &&
-          `Consegna prevista il ${formatIT(order.deliveryDate)} alle ${order.deliveryTime}.`}
-        {order.status === "consegnato" &&
-          `Consegnato il ${formatIT(order.deliveryDate)} alle ${order.deliveryTime}.`}
-      </div>
+
+      {order.status === "nuovo" ? (
+        <div className="mt-3 bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm rounded-xl p-3 font-medium">
+          ✅ Richiesta inviata! Riceverai una notifica di conferma il prima possibile.
+        </div>
+      ) : (
+        <div className="mt-3 bg-gray-50 text-sm text-gray-600 rounded-xl p-3">
+          {order.status === "pronto" &&
+            "Il tuo ordine è pronto ed è in attesa di essere programmato per la consegna."}
+          {order.status === "programmato" &&
+            `Consegna prevista il ${formatIT(order.deliveryDate)} alle ${order.deliveryTime}.`}
+          {order.status === "consegnato" &&
+            `Consegnato il ${formatIT(order.deliveryDate)} alle ${order.deliveryTime}.`}
+        </div>
+      )}
+
+      {hasStaffPing && !showChat && (
+        <button
+          onClick={() => setShowChat(true)}
+          className="mt-3 w-full bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold rounded-xl p-3 text-left"
+        >
+          🔔 La lavanderia ti ha scritto riguardo a questo ordine — tocca per rispondere
+        </button>
+      )}
+
+      {!showChat ? (
+        <button
+          onClick={() => setShowChat(true)}
+          className="mt-3 text-xs font-semibold text-gray-500 underline"
+        >
+          {messages.length > 0 ? `Messaggi (${messages.length})` : "Scrivi alla lavanderia"}
+        </button>
+      ) : (
+        <OrderChat order={order} sender="client" onSend={onSendMessage} />
+      )}
     </div>
   );
 }
@@ -2204,7 +2375,7 @@ function ClienteDashboard({ data, client, actions }) {
           <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine ancora.</p>
         )}
         {myOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} />
+          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} />
         ))}
       </div>
     );
@@ -2254,7 +2425,7 @@ function ClienteDashboard({ data, client, actions }) {
           </p>
         )}
         {activeOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} />
+          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} />
         ))}
       </div>
 
@@ -2350,6 +2521,11 @@ export default function App() {
     setOrderNote: async (orderId, note) => {
       await api.setOrderNote(orderId, note);
       await refresh();
+    },
+    sendOrderMessage: async (orderId, sender, message) => {
+      const res = await api.sendOrderMessage(orderId, sender, message);
+      await refresh();
+      return res;
     },
     completeProfile: async (clientId, fields) => {
       await api.completeProfile(clientId, fields);

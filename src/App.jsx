@@ -1967,6 +1967,165 @@ function CompleteProfileScreen({ client, onComplete, onLogout }) {
   );
 }
 
+function RecoverProfileScreen({ email, onComplete, onLogout }) {
+  const [businessName, setBusinessName] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [billingName, setBillingName] = useState("");
+  const [billingVat, setBillingVat] = useState("");
+  const [sameAddress, setSameAddress] = useState(true);
+  const [billingAddress, setBillingAddress] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    if (!businessName.trim() || !deliveryAddress.trim() || !phone.trim() || !billingVat.trim()) {
+      setError("Compila tutti i campi obbligatori.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await onComplete({
+        businessName: businessName.trim(),
+        deliveryAddress: deliveryAddress.trim(),
+        phone: phone.trim(),
+        billingName: billingName.trim() || businessName.trim(),
+        billingVat: billingVat.trim(),
+        billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
+      });
+      if (!res.ok) setError(res.error);
+    } catch (e) {
+      setError("Errore imprevisto: " + (e.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-6 pt-6 pb-8 h-full overflow-y-auto">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-xl font-bold text-gray-900">Completa la registrazione</h2>
+        <button
+          onClick={onLogout}
+          className="text-xs font-semibold text-gray-400 flex items-center gap-1"
+        >
+          <LogOut size={13} /> Esci
+        </button>
+      </div>
+      <p className="text-gray-500 text-sm mb-5">
+        Il tuo accesso ({email}) esiste già, ma mancano ancora i dati della tua struttura.
+        Completali qui sotto per continuare.
+      </p>
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-4">
+          {error}
+        </div>
+      )}
+      <input
+        placeholder="Nome struttura"
+        value={businessName}
+        onChange={(e) => setBusinessName(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <input
+        placeholder="Indirizzo di consegna"
+        value={deliveryAddress}
+        onChange={(e) => setDeliveryAddress(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <input
+        placeholder="Telefono del referente"
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <input
+        placeholder="Ragione sociale (fatturazione)"
+        value={billingName}
+        onChange={(e) => setBillingName(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <input
+        placeholder="Partita IVA / Codice Fiscale"
+        value={billingVat}
+        onChange={(e) => setBillingVat(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <label className="flex items-center gap-2 mb-3 select-none">
+        <input
+          type="checkbox"
+          checked={sameAddress}
+          onChange={(e) => setSameAddress(e.target.checked)}
+          className="w-4 h-4 accent-gray-900"
+        />
+        <span className="text-sm text-gray-600">
+          Indirizzo di fatturazione uguale a quello di consegna
+        </span>
+      </label>
+      {!sameAddress && (
+        <input
+          placeholder="Indirizzo di fatturazione"
+          value={billingAddress}
+          onChange={(e) => setBillingAddress(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+        />
+      )}
+      <button
+        disabled={busy}
+        onClick={submit}
+        className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3 font-bold mt-2"
+      >
+        Salva e continua
+      </button>
+    </div>
+  );
+}
+
+function NoProfileScreen({ email, onRetry, onLogout, onCreateProfile }) {
+  const [showRecover, setShowRecover] = useState(false);
+
+  if (showRecover) {
+    return (
+      <RecoverProfileScreen email={email} onComplete={onCreateProfile} onLogout={onLogout} />
+    );
+  }
+
+  return (
+    <div className="p-6 flex flex-col h-full">
+      <p className="text-sm text-gray-500 mb-2">
+        Il tuo accesso ({email}) è valido, ma non troviamo ancora un profilo collegato.
+      </p>
+      <p className="text-sm text-gray-500 mb-5">
+        Se ti sei appena registrato come <b>amministratore</b>, assicurati che la riga SQL di
+        attivazione sia stata eseguita, poi premi "Riprova". Se invece ti sei registrato come{" "}
+        <b>cliente</b> e la registrazione non si è completata, puoi creare qui i dati della tua
+        struttura.
+      </p>
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={onRetry}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
+        >
+          Riprova
+        </button>
+        <button
+          onClick={onLogout}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
+        >
+          Esci
+        </button>
+      </div>
+      <button
+        onClick={() => setShowRecover(true)}
+        className="text-xs font-semibold text-gray-400 underline text-left"
+      >
+        Sono un cliente: crea qui i dati della mia struttura
+      </button>
+    </div>
+  );
+}
+
 function WaitingActivationScreen({ clientName, onLogout }) {
   return (
     <div className="px-6 pt-5 flex flex-col h-full">
@@ -2196,6 +2355,12 @@ export default function App() {
       await api.completeProfile(clientId, fields);
       await refresh();
     },
+    createClientProfile: async (fields) => {
+      const res = await api.createClientProfile(authUser.id, authUser.email, fields);
+      if (!res.ok) return res;
+      await refresh();
+      return { ok: true };
+    },
     loginClient: async (email, password) => {
       const res = await api.signIn(email, password);
       if (!res.ok) return res;
@@ -2278,27 +2443,12 @@ export default function App() {
           ) : client ? (
             <ClienteView data={data} client={client} actions={actions} />
           ) : (
-            <div className="p-6 flex flex-col h-full">
-              <p className="text-sm text-gray-500 mb-4">
-                Non troviamo il tuo profilo cliente, e il tuo account non risulta ancora attivato
-                come amministratore. Se ti sei appena registrato come amministratore, assicurati
-                che la riga SQL di attivazione sia stata eseguita, poi riprova.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={refresh}
-                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
-                >
-                  Riprova
-                </button>
-                <button
-                  onClick={actions.logout}
-                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
-                >
-                  Esci
-                </button>
-              </div>
-            </div>
+            <NoProfileScreen
+              email={authUser.email}
+              onRetry={refresh}
+              onLogout={actions.logout}
+              onCreateProfile={actions.createClientProfile}
+            />
           )}
         </div>
       </div>

@@ -1552,10 +1552,15 @@ function AdminSignupForm({ onSubmit, onCancel }) {
       return;
     }
     setBusy(true);
-    const res = await onSubmit(email.trim(), password);
-    setBusy(false);
-    if (!res.ok) setError(res.error);
-    else setDone(true);
+    try {
+      const res = await onSubmit(email.trim(), password);
+      if (!res.ok) setError(res.error);
+      else setDone(true);
+    } catch (e) {
+      setError("Errore imprevisto: " + (e.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (done) {
@@ -1641,9 +1646,14 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
   const submitLogin = async () => {
     setError("");
     setBusy(true);
-    const res = await onLogin(loginEmail.trim(), loginPassword);
-    setBusy(false);
-    if (!res.ok) setError(res.error);
+    try {
+      const res = await onLogin(loginEmail.trim(), loginPassword);
+      if (!res.ok) setError(res.error);
+    } catch (e) {
+      setError("Errore imprevisto: " + (e.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitRegister = async () => {
@@ -1663,18 +1673,23 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
       return;
     }
     setBusy(true);
-    const res = await onRegister({
-      businessName: businessName.trim(),
-      email: email.trim(),
-      password,
-      deliveryAddress: deliveryAddress.trim(),
-      phone: phone.trim(),
-      billingName: billingName.trim() || businessName.trim(),
-      billingVat: billingVat.trim(),
-      billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
-    });
-    setBusy(false);
-    if (!res.ok) setError(res.error);
+    try {
+      const res = await onRegister({
+        businessName: businessName.trim(),
+        email: email.trim(),
+        password,
+        deliveryAddress: deliveryAddress.trim(),
+        phone: phone.trim(),
+        billingName: billingName.trim() || businessName.trim(),
+        billingVat: billingVat.trim(),
+        billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
+      });
+      if (!res.ok) setError(res.error);
+    } catch (e) {
+      setError("Errore imprevisto: " + (e.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -2171,20 +2186,37 @@ export default function App() {
     loginClient: async (email, password) => {
       const res = await api.signIn(email, password);
       if (!res.ok) return res;
-      const user = await api.getSession();
-      setAuthUser(user);
-      await refresh();
-      return { ok: true };
+      try {
+        const user = await api.getSession();
+        setAuthUser(user);
+        await refresh();
+        return { ok: true };
+      } catch (e) {
+        console.error("post-login error:", e);
+        return { ok: false, error: "Accesso riuscito ma errore nel caricare i dati: " + (e.message || String(e)) };
+      }
     },
     registerClient: async (fields) => {
       const res = await api.signUpClient(fields);
       if (!res.ok) return res;
-      const user = await api.getSession();
-      setAuthUser(user);
-      await refresh();
-      return { ok: true };
+      try {
+        const user = await api.getSession();
+        setAuthUser(user);
+        await refresh();
+        return { ok: true };
+      } catch (e) {
+        console.error("post-register error:", e);
+        return { ok: false, error: "Account creato ma errore nel caricare i dati: " + (e.message || String(e)) };
+      }
     },
-    adminSignup: async (email, password) => api.signUpAdmin(email, password),
+    adminSignup: async (email, password) => {
+      try {
+        return await api.signUpAdmin(email, password);
+      } catch (e) {
+        console.error("adminSignup error:", e);
+        return { ok: false, error: "Errore: " + (e.message || String(e)) };
+      }
+    },
     logout: async () => {
       await api.signOut();
       setAuthUser(null);

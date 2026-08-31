@@ -42,6 +42,39 @@ export async function signIn(email, password) {
   }
 }
 
+export async function requestPasswordResetOtp(email) {
+  try {
+    const res = await neon.auth.forgetPassword.emailOtp({ email });
+    if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
+    return { ok: true };
+  } catch (e) {
+    console.error("requestPasswordResetOtp error:", e);
+    return { ok: false, error: "Non è stato possibile inviare il codice: " + (e.message || String(e)) };
+  }
+}
+
+export async function resetPasswordWithOtp(email, otp, newPassword) {
+  try {
+    const check = await neon.auth.emailOtp.checkVerificationOtp({
+      email,
+      otp,
+      type: "forget-password",
+    });
+    if (check.error || !check.data || !check.data.success) {
+      return { ok: false, error: "Codice non valido o scaduto." };
+    }
+    const res = await neon.auth.emailOtp.resetPassword({ email, otp, password: newPassword });
+    if (res.error) return { ok: false, error: translateAuthError(res.error.message) };
+    return { ok: true };
+  } catch (e) {
+    console.error("resetPasswordWithOtp error:", e);
+    return {
+      ok: false,
+      error: "Non è stato possibile reimpostare la password: " + (e.message || String(e)),
+    };
+  }
+}
+
 export async function signUpAdmin(email, password) {
   try {
     const res = await neon.auth.signUp.email({ email, password, name: email });
@@ -196,17 +229,27 @@ export async function addCatalogItemForClient(clientId, { name, category, weight
 }
 
 export async function completeProfile(clientId, fields) {
-  await neon
-    .from("clients")
-    .update({
-      name: fields.businessName,
-      delivery_address: fields.deliveryAddress,
-      phone: fields.phone,
-      billing_name: fields.billingName,
-      billing_vat: fields.billingVat,
-      billing_address: fields.billingAddress,
-    })
-    .eq("id", clientId);
+  try {
+    const { error } = await neon
+      .from("clients")
+      .update({
+        name: fields.businessName,
+        delivery_address: fields.deliveryAddress,
+        phone: fields.phone,
+        billing_name: fields.billingName,
+        billing_vat: fields.billingVat,
+        billing_address: fields.billingAddress,
+      })
+      .eq("id", clientId);
+    if (error) {
+      console.error("completeProfile error:", error);
+      return { ok: false, error: "Non ho potuto salvare i dati: " + error.message };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("completeProfile error:", e);
+    return { ok: false, error: "Errore nel salvare i dati: " + (e.message || String(e)) };
+  }
 }
 
 export async function createClientProfile(userId, email, fields) {
@@ -381,6 +424,30 @@ export async function updateOrderItemQty(orderId, itemId, newQty) {
   const { data: itemRows } = await neon.from("order_items").select("qty, price").eq("order_id", orderId);
   const total = (itemRows || []).reduce((s, it) => s + it.qty * Number(it.price), 0);
   await neon.from("orders").update({ total }).eq("id", orderId);
+}
+
+export async function updateOrderItems(orderId, items) {
+  try {
+    const keep = items.filter((it) => it.qty > 0);
+    await neon.from("order_items").delete().eq("order_id", orderId);
+    if (keep.length > 0) {
+      await neon.from("order_items").insert(
+        keep.map((it) => ({
+          order_id: orderId,
+          item_id: it.itemId,
+          name: it.name,
+          qty: it.qty,
+          price: it.price,
+        }))
+      );
+    }
+    const total = keep.reduce((s, it) => s + it.qty * it.price, 0);
+    await neon.from("orders").update({ total }).eq("id", orderId);
+    return { ok: true };
+  } catch (e) {
+    console.error("updateOrderItems error:", e);
+    return { ok: false, error: "Errore nel salvare i capi: " + (e.message || String(e)) };
+  }
 }
 
 export async function setOrderNote(orderId, note) {

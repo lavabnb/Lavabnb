@@ -18,6 +18,7 @@ import {
   Trash2,
   LogOut,
   ChevronDown,
+  Settings,
 } from "lucide-react";
 import * as api from "./api";
 
@@ -34,6 +35,11 @@ function formatIT(iso) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
+}
+function toNumber(str) {
+  if (typeof str !== "string") return Number(str) || 0;
+  const n = parseFloat(str.replace(",", "."));
+  return isNaN(n) ? 0 : n;
 }
 function formatDateTimeIT(isoDateTime) {
   const d = new Date(isoDateTime);
@@ -107,6 +113,13 @@ const STATUS = {
   consegnato: { label: "Consegnato", color: "bg-slate-400" },
 };
 
+const CLIENT_STATUS = {
+  nuovo: { label: "Nuovo", color: "bg-blue-500" },
+  pronto: { label: "Confermato", color: "bg-purple-500" },
+  programmato: { label: "Confermato", color: "bg-purple-500" },
+  consegnato: { label: "Consegnato", color: "bg-slate-400" },
+};
+
 // ---------- UI helpers ----------
 function Pill({ children, active, onClick, icon }) {
   return (
@@ -134,8 +147,8 @@ function StatCard({ value, label, valueClass = "text-gray-900", icon }) {
   );
 }
 
-function StatusDot({ status }) {
-  const s = STATUS[status];
+function StatusDot({ status, forClient }) {
+  const s = (forClient ? CLIENT_STATUS : STATUS)[status];
   return (
     <span className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
       <span className={`w-2.5 h-2.5 rounded-full ${s.color}`} />
@@ -227,8 +240,8 @@ function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem,
     onAddNewItem(client.id, {
       name: newName.trim(),
       category,
-      weightKg: parseFloat(newWeight),
-      price: parseFloat(newPrice),
+      weightKg: toNumber(newWeight),
+      price: toNumber(newPrice),
     });
     setNewName("");
     setNewWeight("");
@@ -291,12 +304,10 @@ function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem,
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-gray-400 text-sm">€</span>
                       <input
-                        type="number"
-                        step="0.10"
+                        type="text"
+                        inputMode="decimal"
                         value={client.pricing[it.id]}
-                        onChange={(e) =>
-                          onSetPrice(client.id, it.id, parseFloat(e.target.value) || 0)
-                        }
+                        onChange={(e) => onSetPrice(client.id, it.id, toNumber(e.target.value))}
                         className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
                       />
                     </div>
@@ -317,16 +328,16 @@ function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem,
                 <div className="flex gap-2 mb-2">
                   <input
                     placeholder="Peso kg"
-                    type="number"
-                    step="0.1"
+                    type="text"
+                    inputMode="decimal"
                     value={newWeight}
                     onChange={(e) => setNewWeight(e.target.value)}
                     className="w-1/2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
                   />
                   <input
                     placeholder="Prezzo €"
-                    type="number"
-                    step="0.10"
+                    type="text"
+                    inputMode="decimal"
                     value={newPrice}
                     onChange={(e) => setNewPrice(e.target.value)}
                     className="w-1/2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
@@ -425,6 +436,40 @@ function ScheduleForm({ order, onConfirm, onCancel }) {
   );
 }
 
+function ConfirmDeliverButton({ orderId, onConfirm, className }) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="text-xs text-gray-500 whitespace-nowrap">Sicuro?</span>
+        <button
+          onClick={() => onConfirm(orderId)}
+          className="bg-rose-600 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+        >
+          Sì
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
+        >
+          No
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={() => setConfirming(true)}
+      className={
+        className ||
+        "border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800 flex items-center gap-1 shrink-0"
+      }
+    >
+      <Check size={12} /> Consegnato
+    </button>
+  );
+}
+
 function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
   const [scheduling, setScheduling] = useState(false);
   const urgent = isUrgentOrder(order);
@@ -503,12 +548,7 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
           <span className="text-sm text-gray-600">
             Consegna: {formatIT(order.deliveryDate)} alle {order.deliveryTime}
           </span>
-          <button
-            onClick={() => onMarkDelivered(order.id)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800 flex items-center gap-1 shrink-0"
-          >
-            <Check size={12} /> Consegnato
-          </button>
+          <ConfirmDeliverButton orderId={order.id} onConfirm={onMarkDelivered} />
         </div>
       )}
     </div>
@@ -518,8 +558,10 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
 function OrderDetailAdminScreen({
   order,
   clientName,
+  client,
+  catalog,
   onBack,
-  onUpdateQty,
+  onUpdateItems,
   onSetNote,
   onMarkReady,
   onUnschedule,
@@ -528,7 +570,49 @@ function OrderDetailAdminScreen({
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [draftItems, setDraftItems] = useState(() => order.items.map((it) => ({ ...it })));
+  const [dirty, setDirty] = useState(false);
+  const [savingItems, setSavingItems] = useState(false);
+  const [addingItem, setAddingItem] = useState(false);
   const urgent = isUrgentOrder(order);
+  const isConsegnato = order.status === "consegnato";
+
+  useEffect(() => {
+    setDraftItems(order.items.map((it) => ({ ...it })));
+    setDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id]);
+
+  const setDraftQty = (itemId, newQty) => {
+    setDraftItems((items) =>
+      items.map((it) => (it.itemId === itemId ? { ...it, qty: Math.max(0, newQty) } : it))
+    );
+    setDirty(true);
+  };
+
+  const addDraftItem = (catalogItem) => {
+    setDraftItems((items) => [
+      ...items,
+      { itemId: catalogItem.id, name: catalogItem.name, qty: 1, price: client.pricing[catalogItem.id] },
+    ]);
+    setDirty(true);
+    setAddingItem(false);
+  };
+
+  const saveItems = async () => {
+    setSavingItems(true);
+    await onUpdateItems(order.id, draftItems);
+    setDraftItems((items) => items.filter((it) => it.qty > 0));
+    setDirty(false);
+    setSavingItems(false);
+  };
+
+  const draftTotal = draftItems.reduce((s, it) => s + it.qty * it.price, 0);
+  const availableToAdd = client
+    ? catalog.filter(
+        (it) => client.pricing[it.id] !== undefined && !draftItems.some((d) => d.itemId === it.id)
+      )
+    : [];
 
   return (
     <div className="px-6 pt-5 pb-8">
@@ -560,22 +644,25 @@ function OrderDetailAdminScreen({
 
       <div className="font-bold text-gray-900 mb-3">Capi ordinati</div>
       <div className="border border-gray-200 rounded-2xl divide-y divide-gray-100 mb-2">
-        {order.items.map((it) => (
-          <div key={it.itemId} className="flex items-center justify-between px-4 py-3">
+        {draftItems.map((it) => (
+          <div
+            key={it.itemId}
+            className={`flex items-center justify-between px-4 py-3 ${it.qty === 0 ? "opacity-40" : ""}`}
+          >
             <div className="min-w-0">
               <div className="text-sm font-medium text-gray-900 truncate">{it.name}</div>
               <div className="text-xs text-gray-400">€{it.price.toFixed(2)}/pezzo</div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => onUpdateQty(order.id, it.itemId, it.qty - 1)}
+                onClick={() => setDraftQty(it.itemId, it.qty - 1)}
                 className="w-8 h-8 border border-gray-300 rounded-lg flex items-center justify-center"
               >
                 <Minus size={14} />
               </button>
               <span className="w-6 text-center font-semibold text-sm">{it.qty}</span>
               <button
-                onClick={() => onUpdateQty(order.id, it.itemId, it.qty + 1)}
+                onClick={() => setDraftQty(it.itemId, it.qty + 1)}
                 className="w-8 h-8 border border-gray-300 rounded-lg flex items-center justify-center"
               >
                 <Plus size={14} />
@@ -583,16 +670,69 @@ function OrderDetailAdminScreen({
             </div>
           </div>
         ))}
-        {order.items.length === 0 && (
+        {draftItems.length === 0 && (
           <div className="px-4 py-6 text-center text-sm text-gray-400">
             Nessun capo in questo ordine.
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between px-1 mb-6">
+
+      {client &&
+        (addingItem ? (
+          <div className="border border-gray-200 rounded-xl p-3 mb-4">
+            <div className="text-xs font-semibold text-gray-500 mb-2">
+              Scegli un prodotto dal listino del cliente
+            </div>
+            {availableToAdd.length === 0 ? (
+              <p className="text-xs text-gray-400 mb-2">
+                Tutti i prodotti del listino sono già in questo ordine.
+              </p>
+            ) : (
+              <div className="divide-y divide-gray-100 mb-2">
+                {availableToAdd.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => addDraftItem(it)}
+                    className="w-full flex items-center justify-between py-2 text-sm text-left"
+                  >
+                    <span>
+                      {CATEGORY_ICON[it.category]} {it.name}
+                    </span>
+                    <span className="text-gray-400">€{client.pricing[it.id].toFixed(2)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setAddingItem(false)}
+              className="text-xs font-semibold text-gray-500"
+            >
+              Chiudi
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAddingItem(true)}
+            className="w-full border border-dashed border-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2 mb-4"
+          >
+            <Plus size={14} /> Aggiungi prodotto
+          </button>
+        ))}
+
+      <div className="flex items-center justify-between px-1 mb-4">
         <span className="font-semibold text-gray-700">Totale</span>
-        <span className="font-bold text-xl text-gray-900">€{order.total.toFixed(2)}</span>
+        <span className="font-bold text-xl text-gray-900">€{draftTotal.toFixed(2)}</span>
       </div>
+
+      {dirty && (
+        <button
+          disabled={savingItems}
+          onClick={saveItems}
+          className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-2.5 text-sm font-bold mb-6"
+        >
+          {savingItems ? "Salvataggio..." : "Salva modifiche ai capi"}
+        </button>
+      )}
 
       <div className="font-bold text-gray-900 mb-2">Note</div>
       <textarea
@@ -618,7 +758,7 @@ function OrderDetailAdminScreen({
           Richiedi modifica (orario/quantità)
         </button>
       )}
-      <OrderChat order={order} sender="staff" onSend={onSendMessage} />
+      <OrderChat order={order} sender="staff" onSend={onSendMessage} readOnly={isConsegnato} />
 
       <div className="mt-6" />
 
@@ -1109,12 +1249,11 @@ function CalendarioScreen({ orders, clients, onMarkDelivered, onOpenDetail }) {
           </div>
           <div className="flex gap-2 mt-3">
             {o.status === "programmato" && (
-              <button
-                onClick={() => onMarkDelivered(o.id)}
+              <ConfirmDeliverButton
+                orderId={o.id}
+                onConfirm={onMarkDelivered}
                 className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold text-gray-800 flex items-center justify-center gap-1.5"
-              >
-                <Check size={14} /> Consegnato
-              </button>
+              />
             )}
             <button
               onClick={() => onOpenDetail(o.id)}
@@ -1248,15 +1387,18 @@ function LavanderiaView({ data, actions }) {
 
   if (detailOrderId) {
     const order = data.orders.find((o) => o.id === detailOrderId);
-    const clientName = data.clients.find((c) => c.id === order.clientId)?.name || "—";
+    const orderClient = data.clients.find((c) => c.id === order.clientId);
+    const clientName = orderClient?.name || "—";
     return (
       <div className="flex flex-col h-full">
         <div className="flex-1 overflow-y-auto">
           <OrderDetailAdminScreen
             order={order}
             clientName={clientName}
+            client={orderClient}
+            catalog={data.catalog}
             onBack={() => setDetailOrderId(null)}
-            onUpdateQty={actions.updateOrderItemQty}
+            onUpdateItems={actions.updateOrderItems}
             onSetNote={actions.setOrderNote}
             onMarkReady={(id) => actions.markReady(id)}
             onUnschedule={(id) => {
@@ -1579,7 +1721,7 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   );
 }
 
-function OrderChat({ order, sender, onSend }) {
+function OrderChat({ order, sender, onSend, readOnly }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1597,7 +1739,9 @@ function OrderChat({ order, sender, onSend }) {
 
   return (
     <div className="mt-3 border border-gray-200 rounded-xl p-3">
-      <div className="text-xs font-bold text-gray-500 mb-2">Messaggi sull'ordine</div>
+      <div className="text-xs font-bold text-gray-500 mb-2">
+        {readOnly ? "Messaggi sull'ordine (archiviati)" : "Messaggi sull'ordine"}
+      </div>
       {messages.length === 0 && (
         <p className="text-xs text-gray-400 mb-2">Nessun messaggio ancora.</p>
       )}
@@ -1615,23 +1759,27 @@ function OrderChat({ order, sender, onSend }) {
           ))}
         </div>
       )}
-      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
-      <div className="flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Scrivi un messaggio..."
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-        />
-        <button
-          disabled={busy}
-          onClick={submit}
-          className="bg-gray-900 disabled:bg-gray-300 text-white rounded-lg px-4 text-sm font-semibold"
-        >
-          Invia
-        </button>
-      </div>
+      {!readOnly && (
+        <>
+          {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+          <div className="flex gap-2">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="Scrivi un messaggio..."
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+            <button
+              disabled={busy}
+              onClick={submit}
+              className="bg-gray-900 disabled:bg-gray-300 text-white rounded-lg px-4 text-sm font-semibold"
+            >
+              Invia
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1640,7 +1788,8 @@ function ClienteOrderCard({ order, onSendMessage }) {
   const [showChat, setShowChat] = useState(false);
   const messages = order.messages || [];
   const lastMsg = messages[messages.length - 1];
-  const hasStaffPing = lastMsg && lastMsg.sender === "staff";
+  const isConsegnato = order.status === "consegnato";
+  const hasStaffPing = !isConsegnato && lastMsg && lastMsg.sender === "staff";
 
   return (
     <div className="border border-gray-200 rounded-2xl p-5 mb-4">
@@ -1654,7 +1803,7 @@ function ClienteOrderCard({ order, onSendMessage }) {
         {order.items.map((it) => `${it.qty}× ${it.name}`).join(" · ")}
       </div>
       <div className="mt-3">
-        <StatusDot status={order.status} />
+        <StatusDot status={order.status} forClient />
       </div>
 
       {order.status === "nuovo" ? (
@@ -1664,7 +1813,7 @@ function ClienteOrderCard({ order, onSendMessage }) {
       ) : (
         <div className="mt-3 bg-gray-50 text-sm text-gray-600 rounded-xl p-3">
           {order.status === "pronto" &&
-            "Il tuo ordine è pronto ed è in attesa di essere programmato per la consegna."}
+            "Il tuo ordine è stato confermato. Ti contatteremo a breve per fissare l'orario di consegna."}
           {order.status === "programmato" &&
             `Consegna prevista il ${formatIT(order.deliveryDate)} alle ${order.deliveryTime}.`}
           {order.status === "consegnato" &&
@@ -1681,16 +1830,21 @@ function ClienteOrderCard({ order, onSendMessage }) {
         </button>
       )}
 
-      {!showChat ? (
-        <button
-          onClick={() => setShowChat(true)}
-          className="mt-3 text-xs font-semibold text-gray-500 underline"
-        >
-          {messages.length > 0 ? `Messaggi (${messages.length})` : "Scrivi alla lavanderia"}
-        </button>
-      ) : (
-        <OrderChat order={order} sender="client" onSend={onSendMessage} />
-      )}
+      {(!isConsegnato || messages.length > 0) &&
+        (!showChat ? (
+          <button
+            onClick={() => setShowChat(true)}
+            className="mt-3 text-xs font-semibold text-gray-500 underline"
+          >
+            {isConsegnato
+              ? `Messaggi archiviati (${messages.length})`
+              : messages.length > 0
+              ? `Messaggi (${messages.length})`
+              : "Scrivi alla lavanderia"}
+          </button>
+        ) : (
+          <OrderChat order={order} sender="client" onSend={onSendMessage} readOnly={isConsegnato} />
+        ))}
     </div>
   );
 }
@@ -1805,9 +1959,119 @@ function AdminSignupForm({ onSubmit, onCancel }) {
   );
 }
 
-function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
+function ForgotPasswordFlow({ onRequestOtp, onReset, onCancel }) {
+  const [step, setStep] = useState("email");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const sendOtp = async () => {
+    setError("");
+    setInfo("");
+    if (!email.trim()) {
+      setError("Inserisci la tua email.");
+      return;
+    }
+    setBusy(true);
+    const res = await onRequestOtp(email.trim());
+    setBusy(false);
+    if (!res.ok) setError(res.error);
+    else {
+      setInfo("Ti abbiamo inviato un codice via email. Controlla anche lo spam.");
+      setStep("otp");
+    }
+  };
+
+  const doReset = async () => {
+    setError("");
+    if (!otp.trim() || !newPassword || newPassword !== confirmPassword) {
+      setError("Controlla il codice e assicurati che le due password coincidano.");
+      return;
+    }
+    setBusy(true);
+    const res = await onReset(email.trim(), otp.trim(), newPassword);
+    setBusy(false);
+    if (!res.ok) setError(res.error);
+    else setInfo("Password aggiornata! Ora puoi accedere con la nuova password.");
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-4 mt-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-bold text-gray-900">Recupera password</div>
+        <button onClick={onCancel} className="text-xs text-gray-400 font-semibold">
+          Chiudi
+        </button>
+      </div>
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-3">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">
+          {info}
+        </div>
+      )}
+      {step === "email" ? (
+        <>
+          <input
+            placeholder="La tua email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <button
+            disabled={busy}
+            onClick={sendOtp}
+            className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+          >
+            Invia codice via email
+          </button>
+        </>
+      ) : (
+        <>
+          <input
+            placeholder="Codice ricevuto via email"
+            value={otp}
+            onChange={(e) => setOtp(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <input
+            placeholder="Nuova password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <input
+            placeholder="Conferma nuova password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <button
+            disabled={busy}
+            onClick={doReset}
+            className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+          >
+            Reimposta password
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset, onResetPassword }) {
   const [mode, setMode] = useState("login");
   const [showAdminForm, setShowAdminForm] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -1932,6 +2196,20 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
           >
             Accedi
           </button>
+          {!showForgot ? (
+            <button
+              onClick={() => setShowForgot(true)}
+              className="text-xs font-semibold text-gray-500 underline mt-3"
+            >
+              Password dimenticata?
+            </button>
+          ) : (
+            <ForgotPasswordFlow
+              onRequestOtp={onRequestPasswordReset}
+              onReset={onResetPassword}
+              onCancel={() => setShowForgot(false)}
+            />
+          )}
         </div>
       ) : (
         <div>
@@ -2035,22 +2313,29 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup }) {
   );
 }
 
-function CompleteProfileScreen({ client, onComplete, onLogout }) {
+function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
   const [businessName, setBusinessName] = useState(client.name || "");
   const [deliveryAddress, setDeliveryAddress] = useState(client.account.deliveryAddress || "");
   const [phone, setPhone] = useState(client.account.phone || "");
   const [billingName, setBillingName] = useState(client.account.billingName || "");
   const [billingVat, setBillingVat] = useState(client.account.billingVat || "");
-  const [sameAddress, setSameAddress] = useState(true);
+  const [sameAddress, setSameAddress] = useState(
+    !client.account.billingAddress || client.account.billingAddress === client.account.deliveryAddress
+  );
   const [billingAddress, setBillingAddress] = useState(client.account.billingAddress || "");
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
+    setError("");
+    setSaved(false);
     if (!deliveryAddress.trim() || !phone.trim() || !billingVat.trim()) {
       setError("Compila tutti i campi obbligatori.");
       return;
     }
-    onComplete({
+    setBusy(true);
+    const res = await onComplete({
       businessName: businessName.trim(),
       deliveryAddress: deliveryAddress.trim(),
       phone: phone.trim(),
@@ -2058,22 +2343,40 @@ function CompleteProfileScreen({ client, onComplete, onLogout }) {
       billingVat: billingVat.trim(),
       billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
     });
+    setBusy(false);
+    if (res && res.ok === false) setError(res.error);
+    else if (onBack) setSaved(true);
   };
 
   return (
     <div className="px-6 pt-6 pb-8 h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xl font-bold text-gray-900">Completa il tuo profilo</h2>
-        <button
-          onClick={onLogout}
-          className="text-xs font-semibold text-gray-400 flex items-center gap-1"
-        >
-          <LogOut size={13} /> Esci
-        </button>
-      </div>
-      <p className="text-gray-500 text-sm mb-5">
-        Ci servono ancora alcuni dati prima di attivare il tuo account.
-      </p>
+      {onBack ? (
+        <ScreenHeader
+          title="I tuoi dati"
+          subtitle="Modifica in qualsiasi momento i dati della tua struttura"
+          onBack={onBack}
+        />
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-xl font-bold text-gray-900">Completa il tuo profilo</h2>
+            <button
+              onClick={onLogout}
+              className="text-xs font-semibold text-gray-400 flex items-center gap-1"
+            >
+              <LogOut size={13} /> Esci
+            </button>
+          </div>
+          <p className="text-gray-500 text-sm mb-5">
+            Ci servono ancora alcuni dati prima di attivare il tuo account.
+          </p>
+        </>
+      )}
+      {saved && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-4">
+          Dati aggiornati con successo.
+        </div>
+      )}
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-4">
           {error}
@@ -2129,10 +2432,11 @@ function CompleteProfileScreen({ client, onComplete, onLogout }) {
         />
       )}
       <button
+        disabled={busy}
         onClick={submit}
-        className="w-full bg-gray-900 text-white rounded-xl py-3 font-bold mt-2"
+        className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3 font-bold mt-2"
       >
-        Salva e continua
+        {busy ? "Salvataggio..." : onBack ? "Salva modifiche" : "Salva e continua"}
       </button>
     </div>
   );
@@ -2330,7 +2634,7 @@ function ClienteDashboard({ data, client, actions }) {
     .filter((o) => o.clientId === client.id)
     .sort((a, b) => b.id - a.id);
   const active = myOrders.filter((o) => o.status !== "consegnato").length;
-  const programmati = myOrders.filter((o) => o.status === "programmato").length;
+  const confermati = myOrders.filter((o) => o.status === "pronto" || o.status === "programmato").length;
   const myNotifications = (data.notifications || []).filter((n) => n.clientId === client.id);
 
   const bottomItems = [
@@ -2363,6 +2667,16 @@ function ClienteDashboard({ data, client, actions }) {
     );
   }
 
+  if (subScreen === "profilo") {
+    return (
+      <CompleteProfileScreen
+        client={client}
+        onComplete={(fields) => actions.completeProfile(client.id, fields)}
+        onBack={() => setSubScreen("dashboard")}
+      />
+    );
+  }
+
   if (subScreen === "cronologia") {
     return (
       <div className="px-6 pt-5 pb-6 h-full overflow-y-auto">
@@ -2388,12 +2702,20 @@ function ClienteDashboard({ data, client, actions }) {
       <div className="flex-1 overflow-y-auto px-6 pt-5">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-2xl font-bold text-gray-900">Ciao, {client.name}! 👋</h2>
-          <button
-            onClick={actions.logout}
-            className="text-xs font-semibold text-gray-400 flex items-center gap-1 shrink-0"
-          >
-            <LogOut size={13} /> Esci
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setSubScreen("profilo")}
+              className="text-xs font-semibold text-gray-400 flex items-center gap-1"
+            >
+              <Settings size={13} /> I miei dati
+            </button>
+            <button
+              onClick={actions.logout}
+              className="text-xs font-semibold text-gray-400 flex items-center gap-1"
+            >
+              <LogOut size={13} /> Esci
+            </button>
+          </div>
         </div>
         <p className="text-gray-500 mt-1 mb-5">Gestisci i tuoi ordini di biancheria</p>
 
@@ -2406,7 +2728,7 @@ function ClienteDashboard({ data, client, actions }) {
 
         <div className="flex gap-4 mb-6">
           <StatCard value={active} label="Ordini Attivi" />
-          <StatCard value={programmati} label="Programmati" valueClass="text-amber-600" />
+          <StatCard value={confermati} label="Confermati" valueClass="text-purple-600" />
         </div>
 
         <div className="flex items-center justify-between mb-3">
@@ -2518,6 +2840,11 @@ export default function App() {
       await api.updateOrderItemQty(orderId, itemId, newQty);
       await refresh();
     },
+    updateOrderItems: async (orderId, items) => {
+      const res = await api.updateOrderItems(orderId, items);
+      await refresh();
+      return res;
+    },
     setOrderNote: async (orderId, note) => {
       await api.setOrderNote(orderId, note);
       await refresh();
@@ -2528,8 +2855,9 @@ export default function App() {
       return res;
     },
     completeProfile: async (clientId, fields) => {
-      await api.completeProfile(clientId, fields);
+      const res = await api.completeProfile(clientId, fields);
       await refresh();
+      return res;
     },
     createClientProfile: async (fields) => {
       const res = await api.createClientProfile(authUser.id, authUser.email, fields);
@@ -2571,6 +2899,9 @@ export default function App() {
         return { ok: false, error: "Errore: " + (e.message || String(e)) };
       }
     },
+    requestPasswordReset: async (email) => api.requestPasswordResetOtp(email),
+    resetPassword: async (email, otp, newPassword) =>
+      api.resetPasswordWithOtp(email, otp, newPassword),
     logout: async () => {
       await api.signOut();
       setAuthUser(null);
@@ -2594,6 +2925,8 @@ export default function App() {
             onLogin={actions.loginClient}
             onRegister={actions.registerClient}
             onAdminSignup={actions.adminSignup}
+            onRequestPasswordReset={actions.requestPasswordReset}
+            onResetPassword={actions.resetPassword}
           />
         </div>
       </div>

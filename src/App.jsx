@@ -101,6 +101,11 @@ function isDeliverySoon(order) {
   const dt = new Date(`${order.deliveryDate}T${order.deliveryTime}:00`).getTime();
   return dt - Date.now() < 72 * 60 * 60 * 1000;
 }
+function hasClientMessage(order) {
+  const messages = order.messages || [];
+  const last = messages[messages.length - 1];
+  return !!last && last.sender === "client";
+}
 
 // ---------- Catalogo & clienti (seed) ----------
 const CATEGORY_ORDER = ["Lenzuola", "Asciugamani", "Coperte", "Tavola"];
@@ -142,15 +147,16 @@ function Pill({ children, active, onClick, icon }) {
   );
 }
 
-function StatCard({ value, label, valueClass = "text-gray-900", icon }) {
+function StatCard({ value, label, valueClass = "text-gray-900", icon, onClick }) {
+  const Tag = onClick ? "button" : "div";
   return (
-    <div className="flex-1 border border-gray-200 rounded-2xl p-4">
+    <Tag onClick={onClick} className="flex-1 border border-gray-200 rounded-2xl p-4 text-left">
       <div className="flex items-center justify-between">
         <span className="text-gray-500 text-xs">{label}</span>
         {icon}
       </div>
       <div className={`text-2xl font-bold mt-1 ${valueClass}`}>{value}</div>
-    </div>
+    </Tag>
   );
 }
 
@@ -246,6 +252,7 @@ function ClientDetailScreen({
   onUpdateWeight,
   onDeleteCatalogItem,
   onDeleteClient,
+  onSetVat,
 }) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
@@ -288,6 +295,21 @@ function ClientDetailScreen({
           Cliente aggiunto manualmente: non ha ancora registrato un account in app.
         </div>
       )}
+
+      <label className="flex items-center justify-between border border-gray-200 rounded-2xl p-4 mb-6 select-none">
+        <div>
+          <div className="text-sm font-bold text-gray-900">Mostra IVA al 22%</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            Informativa nella schermata "Da saldare" del cliente — non viene addebitata.
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={client.vatEnabled}
+          onChange={(e) => onSetVat(client.id, e.target.checked)}
+          className="w-5 h-5 accent-gray-900 shrink-0 ml-3"
+        />
+      </label>
 
       {CATEGORY_ORDER.map((cat) => {
         const items = catalog.filter((it) => it.category === cat);
@@ -569,8 +591,9 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
   const [scheduling, setScheduling] = useState(false);
   const urgent = isUrgentOrder(order);
   const deliverySoon = isDeliverySoon(order);
+  const clientMsg = hasClientMessage(order);
   return (
-    <div className="border border-gray-200 rounded-2xl p-5 mb-4">
+    <div className={`border rounded-2xl p-5 mb-4 ${clientMsg ? "border-blue-300 bg-blue-50/30" : "border-gray-200"}`}>
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -583,6 +606,11 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
             {deliverySoon && (
               <span className="bg-blue-50 text-blue-600 text-[11px] font-bold px-2 py-1 rounded-full">
                 CONSEGNA ENTRO 72H
+              </span>
+            )}
+            {clientMsg && (
+              <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-1 rounded-full flex items-center gap-1">
+                <MessageSquare size={11} /> NUOVO MESSAGGIO
               </span>
             )}
           </div>
@@ -787,6 +815,7 @@ function OrderDetailAdminScreen({
   onSendMessage,
   onCreateReturn,
   onApplyCredit,
+  onConfirmPayment,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1004,6 +1033,37 @@ function OrderDetailAdminScreen({
       )}
 
       {isConsegnato && (
+        <div className="border border-gray-200 rounded-xl p-3 mb-6">
+          <div className="text-sm font-bold text-gray-900 mb-2">Stato pagamento</div>
+          {order.paymentStatus === "saldato" ? (
+            <div className="text-sm text-emerald-600 font-medium">✔ Saldato</div>
+          ) : order.paymentStatus === "dichiarato_pagato" ? (
+            <>
+              <div className="text-sm text-amber-600 font-medium mb-2">
+                Il cliente ha dichiarato di aver saldato — in attesa di conferma.
+              </div>
+              <button
+                onClick={() => onConfirmPayment(order.id)}
+                className="w-full bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold"
+              >
+                Conferma saldo ricevuto
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-sm text-gray-500 mb-2">Ancora da saldare.</div>
+              <button
+                onClick={() => onConfirmPayment(order.id)}
+                className="w-full border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
+              >
+                Segna come saldato
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {isConsegnato && (
         <div className="mb-6">
           {!showReturnForm ? (
             <button
@@ -1117,6 +1177,7 @@ function DashboardScreen({
       return a.createdDate.localeCompare(b.createdDate) || a.id - b.id;
     });
   const urgentPending = recenti.filter(isUrgentOrder).length;
+  const pendingMessages = orders.filter(hasClientMessage);
 
   return (
     <div className="px-6 pt-5">
@@ -1172,6 +1233,18 @@ function DashboardScreen({
           </span>
         </div>
       </div>
+
+      {pendingMessages.length > 0 && (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-5">
+          <div className="flex items-center gap-2 text-blue-700 font-semibold">
+            <MessageSquare size={16} /> Messaggi in attesa
+          </div>
+          <div className="text-blue-600 text-sm mt-1">
+            {pendingMessages.length} {pendingMessages.length === 1 ? "ordine ha" : "ordini hanno"} un
+            nuovo messaggio dal cliente da leggere
+          </div>
+        </div>
+      )}
 
       {urgentPending > 0 && (
         <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 mb-5">
@@ -1418,9 +1491,19 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
         </p>
       )}
       {consegnati.map((o) => (
-        <div key={o.id} className="border border-gray-200 rounded-2xl p-5 mb-4">
+        <div
+          key={o.id}
+          className={`border rounded-2xl p-5 mb-4 ${hasClientMessage(o) ? "border-blue-300 bg-blue-50/30" : "border-gray-200"}`}
+        >
           <div className="flex items-center justify-between">
-            <span className="font-bold text-gray-900">#{o.id}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-gray-900">#{o.id}</span>
+              {hasClientMessage(o) && (
+                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <MessageSquare size={10} /> MESSAGGIO
+                </span>
+              )}
+            </div>
             <span className="text-sm text-gray-500">
               {formatIT(o.deliveryDate)} • {o.deliveryTime}
             </span>
@@ -1882,6 +1965,7 @@ function LavanderiaView({ data, actions }) {
             onSendMessage={actions.sendOrderMessage}
             onCreateReturn={actions.createReturn}
             onApplyCredit={actions.applyReturnsToOrder}
+            onConfirmPayment={actions.confirmPayment}
           />
         </div>
         <BottomNav
@@ -1937,6 +2021,7 @@ function LavanderiaView({ data, actions }) {
           actions.deleteClient(id);
           setClientDetailId(null);
         }}
+        onSetVat={actions.setClientVat}
       />
     ) : (
       <ClientiListScreen
@@ -1983,7 +2068,7 @@ function LavanderiaView({ data, actions }) {
 }
 
 // ================= NUOVO ORDINE (lato Cliente) =================
-function NewOrderScreen({ client, catalog, onBack, onCreate }) {
+function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
   const categories = CATEGORY_ORDER.filter((cat) =>
     catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
   );
@@ -1992,6 +2077,9 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   const [slots, setSlots] = useState([{ date: addDaysISO(isoToday(), 2), time: "09:00" }]);
   const [showRecap, setShowRecap] = useState(false);
   const [note, setNote] = useState("");
+  const [returnQtys, setReturnQtys] = useState({});
+  const [returnReason, setReturnReason] = useState("cliente");
+  const [returnNote, setReturnNote] = useState("");
 
   if (categories.length === 0) {
     return (
@@ -2021,6 +2109,9 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
   const hasInvalidSlot = slots.some((s) => !isSlotValid(s.date, s.time));
   const selectedItems = allEnabled.filter((it) => (qty[it.id] || 0) > 0);
   const HOUR_SLOTS = ["09:00", "10:00", "11:00", "12:00", "13:00"];
+  const setReturnQty = (itemId, delta, max) =>
+    setReturnQtys((r) => ({ ...r, [itemId]: Math.max(0, Math.min(max, (r[itemId] || 0) + delta)) }));
+  const returnItemsToSend = (lastOrder?.items || []).filter((it) => (returnQtys[it.itemId] || 0) > 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -2166,6 +2257,67 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
           </button>
         </div>
 
+        {lastOrder && lastOrder.items.length > 0 && (
+          <div className="mb-4 border border-gray-200 rounded-2xl p-4">
+            <div className="font-bold text-gray-900 mb-1">
+              Vuoi rendere dei capi dal tuo ultimo ordine (#{lastOrder.id})?
+            </div>
+            <p className="text-xs text-gray-400 mb-3">Facoltativo — indica quantità e motivo.</p>
+            {lastOrder.items.map((it) => (
+              <div key={it.itemId} className="flex items-center justify-between py-1.5 text-sm">
+                <span className="text-gray-700">{it.name}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setReturnQty(it.itemId, -1, it.qty)}
+                    className="w-7 h-7 border border-gray-300 rounded-lg flex items-center justify-center"
+                  >
+                    <Minus size={12} />
+                  </button>
+                  <span className="w-6 text-center font-semibold">{returnQtys[it.itemId] || 0}</span>
+                  <button
+                    onClick={() => setReturnQty(it.itemId, 1, it.qty)}
+                    className="w-7 h-7 border border-gray-300 rounded-lg flex items-center justify-center"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {returnItemsToSend.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 mt-3 mb-1.5">Motivo</div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { value: "lavaggio", label: "Lavaggio" },
+                    { value: "cliente", label: "Mio errore" },
+                    { value: "qualita", label: "Qualità prodotto" },
+                    { value: "altro", label: "Altro" },
+                  ].map((r) => (
+                    <button
+                      key={r.value}
+                      onClick={() => setReturnReason(r.value)}
+                      className={`text-xs px-3 py-1.5 rounded-full border font-medium ${
+                        returnReason === r.value
+                          ? "bg-gray-900 text-white border-gray-900"
+                          : "border-gray-300 text-gray-700"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  rows={2}
+                  placeholder="Note sul reso (facoltativo)"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </>
+            )}
+          </div>
+        )}
+
         <div className="mb-4">
           <div className="font-bold text-gray-900 mb-1">Note (facoltativo)</div>
           <p className="text-xs text-gray-400 mb-2">
@@ -2197,7 +2349,20 @@ function NewOrderScreen({ client, catalog, onBack, onCreate }) {
                 qty: qty[it.id],
                 price: client.pricing[it.id],
               }));
-            onCreate({ items: orderItems, total, preferredSlots: validSlots, note: note.trim() });
+            onCreate({
+              items: orderItems,
+              total,
+              preferredSlots: validSlots,
+              note: note.trim(),
+              returns: returnItemsToSend.map((it) => ({
+                orderId: lastOrder.id,
+                itemName: it.name,
+                qty: returnQtys[it.itemId],
+                amount: it.price * returnQtys[it.itemId],
+                reason: returnReason,
+                note: returnNote.trim(),
+              })),
+            });
           }}
           className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3.5 font-bold"
         >
@@ -2359,6 +2524,57 @@ function ClienteOrderCard({ order, onSendMessage }) {
         ) : (
           <OrderChat order={order} sender="client" onSend={onSendMessage} readOnly={isConsegnato} />
         ))}
+    </div>
+  );
+}
+
+function SaldareScreen({ orders, vatEnabled, onDeclarePaid, onBack }) {
+  const sorted = [...orders].sort((a, b) => b.id - a.id);
+
+  return (
+    <div className="px-6 pt-5 pb-6 h-full overflow-y-auto">
+      <ScreenHeader
+        title="Da Saldare"
+        subtitle="Spunta gli ordini che hai già pagato"
+        onBack={onBack}
+      />
+      {sorted.length === 0 && (
+        <p className="text-gray-400 text-sm py-8 text-center">
+          Nessun ordine da saldare al momento.
+        </p>
+      )}
+      {sorted.map((o) => {
+        const vat = o.total * 0.22;
+        const pending = o.paymentStatus === "dichiarato_pagato";
+        return (
+          <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-gray-900">#{o.id}</span>
+              <span className="text-sm text-gray-500">{formatIT(o.deliveryDate)}</span>
+            </div>
+            <div className="text-sm text-gray-700 mt-1">Totale: €{o.total.toFixed(2)}</div>
+            {vatEnabled && (
+              <div className="text-xs text-gray-400 mt-0.5">
+                IVA 22% (informativa, non addebitata): €{vat.toFixed(2)}
+              </div>
+            )}
+            <label className="flex items-center gap-2 mt-3 text-sm select-none">
+              <input
+                type="checkbox"
+                checked={pending}
+                disabled={pending}
+                onChange={(e) => e.target.checked && onDeclarePaid(o.id)}
+                className="w-4 h-4 accent-gray-900"
+              />
+              {pending ? (
+                <span className="text-amber-600 font-medium">In attesa di conferma dalla lavanderia</span>
+              ) : (
+                <span className="text-gray-700">Ho saldato questo ordine</span>
+              )}
+            </label>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -3149,6 +3365,7 @@ function ClienteDashboard({ data, client, actions }) {
     .sort((a, b) => b.id - a.id);
   const active = myOrders.filter((o) => o.status !== "consegnato").length;
   const confermati = myOrders.filter((o) => o.status === "pronto" || o.status === "programmato").length;
+  const daSaldare = myOrders.filter((o) => o.status === "consegnato" && o.paymentStatus !== "saldato");
   const myNotifications = (data.notifications || []).filter((n) => n.clientId === client.id);
 
   const bottomItems = [
@@ -3168,13 +3385,18 @@ function ClienteDashboard({ data, client, actions }) {
   }
 
   if (subScreen === "newOrder") {
+    const lastOrder = myOrders.filter((o) => o.status === "consegnato").sort((a, b) => b.id - a.id)[0] || null;
     return (
       <NewOrderScreen
         client={client}
         catalog={data.catalog}
+        lastOrder={lastOrder}
         onBack={() => setSubScreen("dashboard")}
-        onCreate={(payload) => {
+        onCreate={({ returns, ...payload }) => {
           actions.addOrder({ clientId: client.id, ...payload });
+          (returns || []).forEach((r) => {
+            actions.createReturn({ clientId: client.id, ...r });
+          });
           setSubScreen("dashboard");
         }}
       />
@@ -3186,6 +3408,17 @@ function ClienteDashboard({ data, client, actions }) {
       <CompleteProfileScreen
         client={client}
         onComplete={(fields) => actions.completeProfile(client.id, fields)}
+        onBack={() => setSubScreen("dashboard")}
+      />
+    );
+  }
+
+  if (subScreen === "saldare") {
+    return (
+      <SaldareScreen
+        orders={daSaldare}
+        vatEnabled={client.vatEnabled}
+        onDeclarePaid={actions.declarePaid}
         onBack={() => setSubScreen("dashboard")}
       />
     );
@@ -3244,6 +3477,19 @@ function ClienteDashboard({ data, client, actions }) {
           <StatCard value={active} label="Ordini Attivi" />
           <StatCard value={confermati} label="Confermati" valueClass="text-purple-600" />
         </div>
+
+        <button
+          onClick={() => setSubScreen("saldare")}
+          className="w-full border border-gray-200 rounded-2xl p-4 mb-6 text-left flex items-center justify-between"
+        >
+          <div>
+            <div className="text-xs text-gray-500">Da Saldare</div>
+            <div className={`text-2xl font-bold mt-1 ${daSaldare.length > 0 ? "text-rose-600" : "text-gray-900"}`}>
+              {daSaldare.length}
+            </div>
+          </div>
+          <ChevronDown size={18} className="text-gray-400 -rotate-90" />
+        </button>
 
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-bold text-gray-900">I Tuoi Ordini</h3>
@@ -3390,6 +3636,21 @@ export default function App() {
     },
     toggleInvoiced: async (orderId, value) => {
       const res = await api.toggleInvoiced(orderId, value);
+      await refresh();
+      return res;
+    },
+    declarePaid: async (orderId) => {
+      const res = await api.declarePaid(orderId);
+      await refresh();
+      return res;
+    },
+    confirmPayment: async (orderId) => {
+      const res = await api.confirmPayment(orderId);
+      await refresh();
+      return res;
+    },
+    setClientVat: async (clientId, enabled) => {
+      const res = await api.setClientVat(clientId, enabled);
       await refresh();
       return res;
     },

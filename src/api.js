@@ -133,12 +133,13 @@ export async function signOut() {
 // ---------------- Lettura dati ----------------
 
 export async function fetchAll() {
-  const [catalogRes, clientsRes, ordersRes, notifRes, staffRes] = await Promise.all([
+  const [catalogRes, clientsRes, ordersRes, notifRes, staffRes, returnsRes] = await Promise.all([
     neon.from("catalog_items").select("*").order("category"),
     neon.from("clients").select("*, client_pricing(item_id, price)"),
     neon.from("orders").select("*, order_items(*), order_slots(*), order_messages(*)"),
     neon.from("notifications").select("*"),
     neon.from("staff").select("user_id"),
+    neon.from("returns").select("*"),
   ]);
 
   const catalog = (catalogRes.data || []).map((r) => ({
@@ -173,6 +174,8 @@ export async function fetchAll() {
     deliveryDate: o.delivery_date,
     deliveryTime: o.delivery_time ? o.delivery_time.slice(0, 5) : null,
     note: o.note || "",
+    lastModification: o.last_modification || "",
+    invoiced: !!o.invoiced,
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -201,9 +204,23 @@ export async function fetchAll() {
     createdAt: n.created_at,
   }));
 
+  const returns = (returnsRes.data || []).map((r) => ({
+    id: r.id,
+    clientId: r.client_id,
+    orderId: r.order_id,
+    itemName: r.item_name,
+    qty: r.qty,
+    amount: Number(r.amount),
+    reason: r.reason,
+    note: r.note || "",
+    applied: r.applied,
+    appliedOrderId: r.applied_order_id,
+    createdAt: r.created_at,
+  }));
+
   const isStaff = (staffRes.data || []).length > 0;
 
-  return { catalog, clients, orders, notifications, isStaff };
+  return { catalog, clients, orders, notifications, returns, isStaff };
 }
 
 // ---------------- Clienti / listino ----------------
@@ -428,7 +445,13 @@ export async function updateOrderItemQty(orderId, itemId, newQty) {
 
 export async function updateOrderItems(orderId, items) {
   try {
+    const { data: oldRows } = await neon
+      .from("order_items")
+      .select("item_id, name, qty, price")
+      .eq("order_id", orderId);
+    const oldItems = oldRows || [];
     const keep = items.filter((it) => it.qty > 0);
+
     await neon.from("order_items").delete().eq("order_id", orderId);
     if (keep.length > 0) {
       await neon.from("order_items").insert(
@@ -443,6 +466,44 @@ export async function updateOrderItems(orderId, items) {
     }
     const total = keep.reduce((s, it) => s + it.qty * it.price, 0);
     await neon.from("orders").update({ total }).eq("id", orderId);
+
+    const oldMap = Object.fromEntries(oldItems.map((it) => [it.item_id, it]));
+    const newMap = Object.fromEntries(keep.map((it) => [it.itemId, it]));
+    const diffLines = [];
+    const summaryParts = [];
+    for (const it of keep) {
+      const old = oldMap[it.itemId];
+      if (!old) {
+        diffLines.push(`+ aggiunto ${it.qty}× ${it.name}`);
+        summaryParts.push(`aggiunto ${it.qty}× ${it.name}`);
+      } else if (old.qty !== it.qty) {
+        diffLines.push(`✎ ${it.name}: da ${old.qty} a ${it.qty} pezzi`);
+        summaryParts.push(`${it.name} da ${old.qty} a ${it.qty}`);
+      }
+    }
+    for (const old of oldItems) {
+      if (!newMap[old.item_id]) {
+        diffLines.push(`− rimosso ${old.qty}× ${old.name}`);
+        summaryParts.push(`rimosso ${old.qty}× ${old.name}`);
+      }
+    }
+
+    if (diffLines.length > 0) {
+      await neon
+        .from("orders")
+        .update({ last_modification: summaryParts.join("; ") })
+        .eq("id", orderId);
+      const clientId = await getOrderClientId(orderId);
+      if (clientId) {
+        const message = `La lavanderia ha modificato il tuo ordine #${orderId}:\n${diffLines.join("\n")}`;
+        await neon.from("order_messages").insert([{ order_id: orderId, sender: "staff", message }]);
+        await addNotification(
+          clientId,
+          `Il tuo ordine #${orderId} è stato modificato dalla lavanderia. Guarda i dettagli.`
+        );
+      }
+    }
+
     return { ok: true };
   } catch (e) {
     console.error("updateOrderItems error:", e);
@@ -450,6 +511,108 @@ export async function updateOrderItems(orderId, items) {
   }
 }
 
+// ---------------- Catalogo ----------------
+
+export async function deleteCatalogItem(itemId) {
+  try {
+    const { error } = await neon.from("catalog_items").delete().eq("id", itemId);
+    if (error) return { ok: false, error: "Non ho potuto eliminare la tipologia: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("deleteCatalogItem error:", e);
+    return { ok: false, error: "Errore nell'eliminazione: " + (e.message || String(e)) };
+  }
+}
+
+export async function updateCatalogItemWeight(itemId, weightKg) {
+  try {
+    const { error } = await neon.from("catalog_items").update({ weight_kg: weightKg }).eq("id", itemId);
+    if (error) return { ok: false, error: "Non ho potuto salvare il peso: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("updateCatalogItemWeight error:", e);
+    return { ok: false, error: "Errore nel salvare il peso: " + (e.message || String(e)) };
+  }
+}
+
+// ---------------- Clienti (eliminazione) ----------------
+
+export async function deleteClient(clientId) {
+  try {
+    const { error } = await neon.from("clients").delete().eq("id", clientId);
+    if (error) return { ok: false, error: "Non ho potuto eliminare il cliente: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("deleteClient error:", e);
+    return { ok: false, error: "Errore nell'eliminazione: " + (e.message || String(e)) };
+  }
+}
+
+// ---------------- Resi ----------------
+
+export async function createReturn({ clientId, orderId, itemName, qty, amount, reason, note }) {
+  try {
+    const { error } = await neon.from("returns").insert([
+      {
+        client_id: clientId,
+        order_id: orderId || null,
+        item_name: itemName,
+        qty,
+        amount,
+        reason,
+        note: note || "",
+      },
+    ]);
+    if (error) return { ok: false, error: "Non ho potuto registrare il reso: " + error.message };
+    if (orderId) {
+      await addNotification(
+        clientId,
+        `Abbiamo registrato un reso di ${qty}× ${itemName} sul tuo ordine #${orderId} (€${Number(
+          amount
+        ).toFixed(2)} a tuo credito).`
+      );
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("createReturn error:", e);
+    return { ok: false, error: "Errore nel registrare il reso: " + (e.message || String(e)) };
+  }
+}
+
+export async function applyReturnsToOrder(returnIds, orderId) {
+  try {
+    const { data: returnRows } = await neon.from("returns").select("amount, client_id").in("id", returnIds);
+    const totalCredit = (returnRows || []).reduce((s, r) => s + Number(r.amount), 0);
+    await neon.from("returns").update({ applied: true, applied_order_id: orderId }).in("id", returnIds);
+    const { data: orderRows } = await neon.from("orders").select("total").eq("id", orderId);
+    const currentTotal = orderRows && orderRows[0] ? Number(orderRows[0].total) : 0;
+    const newTotal = Math.max(0, currentTotal - totalCredit);
+    await neon.from("orders").update({ total: newTotal }).eq("id", orderId);
+    const clientId = returnRows && returnRows[0] ? returnRows[0].client_id : null;
+    if (clientId) {
+      await addNotification(
+        clientId,
+        `Abbiamo applicato un credito di €${totalCredit.toFixed(2)} al tuo ordine #${orderId}.`
+      );
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("applyReturnsToOrder error:", e);
+    return { ok: false, error: "Errore nell'applicare il credito: " + (e.message || String(e)) };
+  }
+}
+
 export async function setOrderNote(orderId, note) {
   await neon.from("orders").update({ note }).eq("id", orderId);
+}
+
+export async function toggleInvoiced(orderId, value) {
+  try {
+    const { error } = await neon.from("orders").update({ invoiced: value }).eq("id", orderId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("toggleInvoiced error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
 }

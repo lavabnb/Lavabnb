@@ -120,6 +120,13 @@ const CLIENT_STATUS = {
   consegnato: { label: "Consegnato", color: "bg-slate-400" },
 };
 
+const REASON_LABELS = {
+  lavaggio: "Lavaggio",
+  cliente: "Cliente",
+  qualita: "Qualità prodotto",
+  altro: "Altro",
+};
+
 // ---------- UI helpers ----------
 function Pill({ children, active, onClick, icon }) {
   return (
@@ -229,11 +236,23 @@ function ClientiListScreen({ clients, orders, onOpen }) {
   );
 }
 
-function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem, onAddNewItem }) {
+function ClientDetailScreen({
+  client,
+  catalog,
+  onBack,
+  onSetPrice,
+  onRemoveItem,
+  onAddNewItem,
+  onUpdateWeight,
+  onDeleteCatalogItem,
+  onDeleteClient,
+}) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
   const [newWeight, setNewWeight] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [confirmDeleteItemId, setConfirmDeleteItemId] = useState(null);
+  const [confirmDeleteClient, setConfirmDeleteClient] = useState(false);
 
   const submitNewItem = (category) => {
     if (!newName.trim() || !newWeight || !newPrice) return;
@@ -279,37 +298,81 @@ function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem,
             </div>
             {items.map((it) => {
               const enabled = client.pricing[it.id] !== undefined;
+              const confirmingDelete = confirmDeleteItemId === it.id;
               return (
-                <div
-                  key={it.id}
-                  className="flex items-center justify-between border border-gray-200 rounded-xl px-4 py-3 mb-2"
-                >
-                  <label className="flex items-center gap-3 flex-1 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={enabled}
-                      onChange={(e) =>
-                        e.target.checked
-                          ? onSetPrice(client.id, it.id, 0)
-                          : onRemoveItem(client.id, it.id)
-                      }
-                      className="w-4 h-4 accent-gray-900 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">{it.name}</div>
-                      <div className="text-xs text-gray-400">{it.weightKg} kg/pz</div>
-                    </div>
-                  </label>
-                  {enabled && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-gray-400 text-sm">€</span>
+                <div key={it.id} className="border border-gray-200 rounded-xl px-4 py-3 mb-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-3 flex-1 min-w-0">
                       <input
-                        type="text"
-                        inputMode="decimal"
-                        value={client.pricing[it.id]}
-                        onChange={(e) => onSetPrice(client.id, it.id, toNumber(e.target.value))}
-                        className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(e) =>
+                          e.target.checked
+                            ? onSetPrice(client.id, it.id, 0)
+                            : onRemoveItem(client.id, it.id)
+                        }
+                        className="w-4 h-4 accent-gray-900 shrink-0"
                       />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-gray-900 truncate">{it.name}</div>
+                        <div className="flex items-center gap-1 text-xs text-gray-400 mt-0.5">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={it.weightKg}
+                            onChange={(e) => onUpdateWeight(it.id, toNumber(e.target.value))}
+                            className="w-12 border border-gray-200 rounded px-1 py-0.5 text-xs text-right"
+                          />
+                          <span>kg/pz</span>
+                        </div>
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {enabled && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-400 text-sm">€</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={client.pricing[it.id]}
+                            onChange={(e) => onSetPrice(client.id, it.id, toNumber(e.target.value))}
+                            className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                          />
+                        </div>
+                      )}
+                      {!confirmingDelete && (
+                        <button
+                          onClick={() => setConfirmDeleteItemId(it.id)}
+                          className="text-gray-300 hover:text-rose-500"
+                          title="Elimina tipologia dal catalogo"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {confirmingDelete && (
+                    <div className="mt-2 bg-rose-50 border border-rose-200 rounded-lg p-2 flex items-center justify-between">
+                      <span className="text-xs text-rose-600 font-medium">
+                        Eliminare "{it.name}" dal catalogo per tutti i clienti?
+                      </span>
+                      <div className="flex gap-1.5 shrink-0">
+                        <button
+                          onClick={() => {
+                            onDeleteCatalogItem(it.id);
+                            setConfirmDeleteItemId(null);
+                          }}
+                          className="bg-rose-600 text-white text-xs font-semibold rounded-lg px-2.5 py-1"
+                        >
+                          Sì
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteItemId(null)}
+                          className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1"
+                        >
+                          No
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -369,6 +432,38 @@ function ClientDetailScreen({ client, catalog, onBack, onSetPrice, onRemoveItem,
           </div>
         );
       })}
+
+      <div className="mt-8 pt-6 border-t border-gray-100">
+        {!confirmDeleteClient ? (
+          <button
+            onClick={() => setConfirmDeleteClient(true)}
+            className="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+          >
+            <Trash2 size={14} /> Elimina cliente
+          </button>
+        ) : (
+          <div className="border border-rose-200 rounded-xl p-3">
+            <div className="text-sm text-rose-600 font-semibold mb-2">
+              Eliminare definitivamente {client.name}? Verranno eliminati anche tutti i suoi ordini
+              e lo storico. L'operazione non è reversibile.
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onDeleteClient(client.id)}
+                className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-sm font-semibold"
+              >
+                Sì, elimina definitivamente
+              </button>
+              <button
+                onClick={() => setConfirmDeleteClient(false)}
+                className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -555,11 +650,134 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
   );
 }
 
+function ReturnForm({ order, onSubmit, onCancel }) {
+  const [itemName, setItemName] = useState(order.items[0]?.name || "");
+  const [qty, setQty] = useState(1);
+  const [amount, setAmount] = useState(order.items[0] ? order.items[0].price.toFixed(2) : "0");
+  const [reason, setReason] = useState("lavaggio");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const REASONS = [
+    { value: "lavaggio", label: "Lavaggio" },
+    { value: "cliente", label: "Cliente" },
+    { value: "qualita", label: "Qualità prodotto" },
+    { value: "altro", label: "Altro" },
+  ];
+
+  const selectItem = (name) => {
+    setItemName(name);
+    const it = order.items.find((i) => i.name === name);
+    if (it) setAmount((it.price * qty).toFixed(2));
+  };
+
+  const submit = async () => {
+    setError("");
+    const numQty = parseInt(qty, 10) || 1;
+    const numAmount = toNumber(String(amount));
+    if (!itemName || numQty <= 0 || numAmount < 0) {
+      setError("Controlla i dati inseriti.");
+      return;
+    }
+    setBusy(true);
+    const res = await onSubmit({
+      itemName,
+      qty: numQty,
+      amount: numAmount,
+      reason,
+      note: note.trim(),
+    });
+    setBusy(false);
+    if (res && res.ok === false) setError(res.error);
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-3 mb-4">
+      <div className="text-sm font-bold text-gray-900 mb-2">Segnala reso</div>
+      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+      <div className="text-xs font-semibold text-gray-500 mb-1">Capo</div>
+      <select
+        value={itemName}
+        onChange={(e) => selectItem(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+      >
+        {order.items.map((it) => (
+          <option key={it.itemId} value={it.name}>
+            {it.name}
+          </option>
+        ))}
+      </select>
+      <div className="flex gap-2 mb-2">
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-gray-500 mb-1">Quantità</div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => setQty(e.target.value.replace(/[^0-9]/g, ""))}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-gray-500 mb-1">Importo a credito €</div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+      <div className="text-xs font-semibold text-gray-500 mb-1">Causale</div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {REASONS.map((r) => (
+          <button
+            key={r.value}
+            onClick={() => setReason(r.value)}
+            className={`text-xs px-3 py-1.5 rounded-full border font-medium ${
+              reason === r.value
+                ? "bg-gray-900 text-white border-gray-900"
+                : "border-gray-300 text-gray-700"
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Note (facoltativo)"
+        rows={2}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <div className="flex gap-2">
+        <button
+          disabled={busy}
+          onClick={submit}
+          className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+        >
+          Registra reso
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold"
+        >
+          Annulla
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrderDetailAdminScreen({
   order,
   clientName,
   client,
   catalog,
+  returns,
   onBack,
   onUpdateItems,
   onSetNote,
@@ -567,6 +785,8 @@ function OrderDetailAdminScreen({
   onUnschedule,
   onDelete,
   onSendMessage,
+  onCreateReturn,
+  onApplyCredit,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -574,8 +794,12 @@ function OrderDetailAdminScreen({
   const [dirty, setDirty] = useState(false);
   const [savingItems, setSavingItems] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
+  const [showReturnForm, setShowReturnForm] = useState(false);
+  const [selectedCredits, setSelectedCredits] = useState([]);
+  const [applyingCredit, setApplyingCredit] = useState(false);
   const urgent = isUrgentOrder(order);
   const isConsegnato = order.status === "consegnato";
+  const availableCredits = (returns || []).filter((r) => r.clientId === order.clientId && !r.applied);
 
   useEffect(() => {
     setDraftItems(order.items.map((it) => ({ ...it })));
@@ -744,20 +968,68 @@ function OrderDetailAdminScreen({
         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm mb-6"
       />
 
-      {order.status !== "consegnato" && (
-        <button
-          onClick={() =>
-            onSendMessage(
-              order.id,
-              "staff",
-              "Vorremmo proporti una modifica a questo ordine (orario o quantità). Rispondici qui per metterci d'accordo."
-            )
-          }
-          className="w-full border border-amber-200 text-amber-700 bg-amber-50 rounded-xl py-2.5 text-sm font-semibold mb-3"
-        >
-          Richiedi modifica (orario/quantità)
-        </button>
+      {availableCredits.length > 0 && (
+        <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 mb-6">
+          <div className="text-sm font-bold text-emerald-800 mb-2">
+            Crediti resi disponibili per questo cliente
+          </div>
+          {availableCredits.map((r) => (
+            <label key={r.id} className="flex items-center gap-2 py-1 text-sm text-emerald-800">
+              <input
+                type="checkbox"
+                checked={selectedCredits.includes(r.id)}
+                onChange={(e) =>
+                  setSelectedCredits((ids) =>
+                    e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id)
+                  )
+                }
+                className="w-4 h-4"
+              />
+              {r.qty}× {r.itemName} — €{r.amount.toFixed(2)} ({REASON_LABELS[r.reason] || r.reason})
+            </label>
+          ))}
+          <button
+            disabled={selectedCredits.length === 0 || applyingCredit}
+            onClick={async () => {
+              setApplyingCredit(true);
+              await onApplyCredit(selectedCredits, order.id);
+              setSelectedCredits([]);
+              setApplyingCredit(false);
+            }}
+            className="w-full bg-emerald-700 disabled:bg-emerald-300 text-white rounded-lg py-2 text-sm font-semibold mt-2"
+          >
+            Applica credito selezionato a questo ordine
+          </button>
+        </div>
       )}
+
+      {isConsegnato && (
+        <div className="mb-6">
+          {!showReturnForm ? (
+            <button
+              onClick={() => setShowReturnForm(true)}
+              className="w-full border border-dashed border-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+            >
+              <Plus size={14} /> Segnala reso
+            </button>
+          ) : (
+            <ReturnForm
+              order={order}
+              onSubmit={async (fields) => {
+                const res = await onCreateReturn({
+                  clientId: order.clientId,
+                  orderId: order.id,
+                  ...fields,
+                });
+                if (res && res.ok !== false) setShowReturnForm(false);
+                return res;
+              }}
+              onCancel={() => setShowReturnForm(false)}
+            />
+          )}
+        </div>
+      )}
+
       <OrderChat order={order} sender="staff" onSend={onSendMessage} readOnly={isConsegnato} />
 
       <div className="mt-6" />
@@ -1117,8 +1389,14 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
 
 function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const [query, setQuery] = useState("");
   const consegnati = orders
     .filter((o) => o.status === "consegnato")
+    .filter((o) => {
+      if (!query.trim()) return true;
+      const q = query.trim().toLowerCase();
+      return String(o.id).includes(q) || clientName(o.clientId).toLowerCase().includes(q);
+    })
     .sort((a, b) => {
       const da = `${a.deliveryDate}T${a.deliveryTime || "00:00"}`;
       const db = `${b.deliveryDate}T${b.deliveryTime || "00:00"}`;
@@ -1128,9 +1406,15 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
   return (
     <div className="px-6 pt-5">
       <ScreenHeader title="Tutti" subtitle="Consegne già effettuate, per data e ora" onBack={onBack} />
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Cerca per numero ordine o cliente..."
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+      />
       {consegnati.length === 0 && (
         <p className="text-gray-400 text-sm py-8 text-center">
-          Nessuna consegna archiviata ancora.
+          {query.trim() ? "Nessun ordine trovato." : "Nessuna consegna archiviata ancora."}
         </p>
       )}
       {consegnati.map((o) => (
@@ -1269,8 +1553,60 @@ function CalendarioScreen({ orders, clients, onMarkDelivered, onOpenDetail }) {
 }
 
 // ================= STATISTICHE =================
-function StatisticheScreen({ orders, clients, catalog }) {
+function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetail, onToggleInvoiced }) {
+  const sorted = [...orders].sort((a, b) => {
+    const da = `${a.deliveryDate}T${a.deliveryTime || "00:00"}`;
+    const db = `${b.deliveryDate}T${b.deliveryTime || "00:00"}`;
+    return db.localeCompare(da);
+  });
+  const totale = sorted.reduce((s, o) => s + o.total, 0);
+  const daFatturare = sorted.filter((o) => !o.invoiced);
+  const totaleDaFatturare = daFatturare.reduce((s, o) => s + o.total, 0);
+
+  return (
+    <div className="px-6 pt-5 pb-8">
+      <ScreenHeader title={clientName} subtitle="Ordini consegnati e stato fatturazione" onBack={onBack} />
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <StatCard value={`€${totale.toFixed(2)}`} label="Totale consegnato" />
+        <StatCard
+          value={`€${totaleDaFatturare.toFixed(2)}`}
+          label={`Da fatturare (${daFatturare.length})`}
+          valueClass="text-amber-600"
+        />
+      </div>
+
+      {sorted.length === 0 && (
+        <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine consegnato ancora.</p>
+      )}
+      {sorted.map((o) => (
+        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+          <div className="flex items-center justify-between">
+            <button onClick={() => onOpenDetail(o.id)} className="text-left">
+              <div className="font-bold text-gray-900 text-sm">#{o.id}</div>
+              <div className="text-xs text-gray-400">
+                {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
+              </div>
+            </button>
+            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+              <input
+                type="checkbox"
+                checked={o.invoiced}
+                onChange={(e) => onToggleInvoiced(o.id, e.target.checked)}
+                className="w-4 h-4 accent-gray-900"
+              />
+              Fatturato
+            </label>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onToggleInvoiced }) {
   const weightOf = (itemId) => catalog.find((c) => c.id === itemId)?.weightKg || 0;
+  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const consegnati = orders.filter((o) => o.status === "consegnato");
 
   const totaleConsegne = consegnati.length;
@@ -1286,9 +1622,15 @@ function StatisticheScreen({ orders, clients, catalog }) {
       totalePezzi += it.qty;
       perTipo[it.name] = (perTipo[it.name] || 0) + it.qty;
     });
-    const cName = clients.find((c) => c.id === o.clientId)?.name || "—";
-    if (!perCliente[cName]) perCliente[cName] = { pezzi: 0, kg: 0, entrate: 0 };
+    const cName = clientName(o.clientId);
+    if (!perCliente[cName]) {
+      perCliente[cName] = { pezzi: 0, kg: 0, entrate: 0, clientId: o.clientId, daFatturare: 0, daFatturareCount: 0 };
+    }
     perCliente[cName].entrate += o.total;
+    if (!o.invoiced) {
+      perCliente[cName].daFatturare += o.total;
+      perCliente[cName].daFatturareCount += 1;
+    }
     o.items.forEach((it) => {
       perCliente[cName].pezzi += it.qty;
       perCliente[cName].kg += it.qty * weightOf(it.itemId);
@@ -1298,9 +1640,85 @@ function StatisticheScreen({ orders, clients, catalog }) {
   const tipoList = Object.entries(perTipo).sort((a, b) => b[1] - a[1]);
   const clienteList = Object.entries(perCliente).sort((a, b) => b[1].entrate - a[1].entrate);
 
+  const totaleResi = (returns || []).length;
+  const valoreResi = (returns || []).reduce((s, r) => s + r.amount, 0);
+  const perReason = {};
+  const perClienteResi = {};
+  (returns || []).forEach((r) => {
+    if (!perReason[r.reason]) perReason[r.reason] = { count: 0, amount: 0 };
+    perReason[r.reason].count += 1;
+    perReason[r.reason].amount += r.amount;
+    const cName = clientName(r.clientId);
+    if (!perClienteResi[cName]) perClienteResi[cName] = { count: 0, amount: 0 };
+    perClienteResi[cName].count += 1;
+    perClienteResi[cName].amount += r.amount;
+  });
+  const reasonList = Object.entries(perReason).sort((a, b) => b[1].amount - a[1].amount);
+  const clienteResiList = Object.entries(perClienteResi).sort((a, b) => b[1].amount - a[1].amount);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewingClientId, setViewingClientId] = useState(null);
+  const searchResults =
+    searchQuery.trim().length === 0
+      ? []
+      : orders
+          .filter((o) => {
+            const q = searchQuery.trim().toLowerCase();
+            return String(o.id).includes(q) || clientName(o.clientId).toLowerCase().includes(q);
+          })
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 15);
+
+  if (viewingClientId) {
+    return (
+      <ClientInvoiceScreen
+        clientId={viewingClientId}
+        clientName={clientName(viewingClientId)}
+        orders={orders.filter((o) => o.clientId === viewingClientId && o.status === "consegnato")}
+        onBack={() => setViewingClientId(null)}
+        onOpenDetail={onOpenDetail}
+        onToggleInvoiced={onToggleInvoiced}
+      />
+    );
+  }
+
   return (
     <div className="px-6 pt-5 pb-8">
       <ScreenHeader title="Statistiche" subtitle="Calcolate sulle consegne archiviate" />
+
+      <div className="border border-gray-200 rounded-2xl p-4 mb-5">
+        <div className="font-bold text-gray-900 mb-2 text-sm">Cerca un ordine</div>
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Numero ordine o nome cliente..."
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+        />
+        {searchQuery.trim().length > 0 && (
+          <div className="divide-y divide-gray-100">
+            {searchResults.length === 0 && (
+              <p className="text-xs text-gray-400 py-2">Nessun ordine trovato.</p>
+            )}
+            {searchResults.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => onOpenDetail(o.id)}
+                className="w-full flex items-center justify-between py-2 text-left"
+              >
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    #{o.id} • {clientName(o.clientId)}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {formatIT(o.createdDate)} • {STATUS[o.status].label}
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-gray-700">€{o.total.toFixed(2)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-3 mb-5">
         <StatCard value={totaleConsegne} label="Consegne totali" />
@@ -1326,17 +1744,68 @@ function StatisticheScreen({ orders, clients, catalog }) {
         ))}
       </div>
 
-      <div className="border border-gray-200 rounded-2xl p-5">
-        <div className="font-bold text-gray-900 mb-3">Per cliente</div>
+      <div className="border border-gray-200 rounded-2xl p-5 mb-5">
+        <div className="font-bold text-gray-900 mb-1">Per cliente</div>
+        <p className="text-xs text-gray-400 mb-3">Tocca un cliente per vedere i suoi ordini e segnare quali hai già fatturato.</p>
         {clienteList.length === 0 && (
           <p className="text-gray-400 text-sm">Nessun dato ancora disponibile.</p>
         )}
         {clienteList.map(([name, d]) => (
-          <div key={name} className="py-2 border-b border-gray-100 last:border-0">
-            <div className="font-medium text-gray-900 text-sm">{name}</div>
+          <button
+            key={name}
+            onClick={() => setViewingClientId(d.clientId)}
+            className="w-full text-left py-2 border-b border-gray-100 last:border-0"
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-gray-900 text-sm">{name}</div>
+              {d.daFatturareCount > 0 ? (
+                <span className="text-[11px] font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">
+                  {d.daFatturareCount} da fatturare
+                </span>
+              ) : (
+                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
+                  Tutto fatturato
+                </span>
+              )}
+            </div>
             <div className="text-xs text-gray-500 mt-0.5">
               {d.pezzi} pz • {d.kg.toFixed(1)} kg • €{d.entrate.toFixed(2)}
             </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <StatCard value={totaleResi} label="Resi totali" valueClass="text-rose-600" />
+        <StatCard value={`€${valoreResi.toFixed(2)}`} label="Valore resi" valueClass="text-rose-600" />
+      </div>
+
+      <div className="border border-gray-200 rounded-2xl p-5 mb-5">
+        <div className="font-bold text-gray-900 mb-3">Resi per causale</div>
+        {reasonList.length === 0 && (
+          <p className="text-gray-400 text-sm">Nessun reso registrato ancora.</p>
+        )}
+        {reasonList.map(([reason, d]) => (
+          <div key={reason} className="flex items-center justify-between text-sm py-1.5">
+            <span className="text-gray-700">{REASON_LABELS[reason] || reason}</span>
+            <span className="font-semibold text-gray-900">
+              {d.count} • €{d.amount.toFixed(2)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="border border-gray-200 rounded-2xl p-5">
+        <div className="font-bold text-gray-900 mb-3">Resi per cliente</div>
+        {clienteResiList.length === 0 && (
+          <p className="text-gray-400 text-sm">Nessun reso registrato ancora.</p>
+        )}
+        {clienteResiList.map(([name, d]) => (
+          <div key={name} className="flex items-center justify-between text-sm py-1.5">
+            <span className="text-gray-700">{name}</span>
+            <span className="font-semibold text-gray-900">
+              {d.count} • €{d.amount.toFixed(2)}
+            </span>
           </div>
         ))}
       </div>
@@ -1397,6 +1866,7 @@ function LavanderiaView({ data, actions }) {
             clientName={clientName}
             client={orderClient}
             catalog={data.catalog}
+            returns={data.returns}
             onBack={() => setDetailOrderId(null)}
             onUpdateItems={actions.updateOrderItems}
             onSetNote={actions.setOrderNote}
@@ -1410,6 +1880,8 @@ function LavanderiaView({ data, actions }) {
               setDetailOrderId(null);
             }}
             onSendMessage={actions.sendOrderMessage}
+            onCreateReturn={actions.createReturn}
+            onApplyCredit={actions.applyReturnsToOrder}
           />
         </div>
         <BottomNav
@@ -1459,6 +1931,12 @@ function LavanderiaView({ data, actions }) {
         onSetPrice={actions.setClientPrice}
         onRemoveItem={actions.removeClientItem}
         onAddNewItem={actions.addCatalogItemForClient}
+        onUpdateWeight={actions.updateCatalogItemWeight}
+        onDeleteCatalogItem={actions.deleteCatalogItem}
+        onDeleteClient={(id) => {
+          actions.deleteClient(id);
+          setClientDetailId(null);
+        }}
       />
     ) : (
       <ClientiListScreen
@@ -1477,7 +1955,16 @@ function LavanderiaView({ data, actions }) {
       />
     );
   } else if (nav === "statistiche") {
-    content = <StatisticheScreen orders={data.orders} clients={data.clients} catalog={data.catalog} />;
+    content = (
+      <StatisticheScreen
+        orders={data.orders}
+        clients={data.clients}
+        catalog={data.catalog}
+        returns={data.returns}
+        onOpenDetail={setDetailOrderId}
+        onToggleInvoiced={actions.toggleInvoiced}
+      />
+    );
   }
 
   return (
@@ -1786,6 +2273,7 @@ function OrderChat({ order, sender, onSend, readOnly }) {
 
 function ClienteOrderCard({ order, onSendMessage }) {
   const [showChat, setShowChat] = useState(false);
+  const [showItems, setShowItems] = useState(false);
   const messages = order.messages || [];
   const lastMsg = messages[messages.length - 1];
   const isConsegnato = order.status === "consegnato";
@@ -1799,9 +2287,35 @@ function ClienteOrderCard({ order, onSendMessage }) {
           {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
         </span>
       </div>
-      <div className="mt-3 text-xs text-gray-500">
-        {order.items.map((it) => `${it.qty}× ${it.name}`).join(" · ")}
+
+      <div className="mt-3 border border-gray-100 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowItems((s) => !s)}
+          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-600"
+        >
+          <span>
+            {order.items.reduce((s, it) => s + it.qty, 0)} capi ordinati
+          </span>
+          <ChevronDown size={14} className={`transition-transform ${showItems ? "rotate-180" : ""}`} />
+        </button>
+        {showItems && (
+          <div className="px-3 pb-2 divide-y divide-gray-50">
+            {order.items.map((it) => (
+              <div key={it.itemId} className="flex items-center justify-between py-1.5 text-sm">
+                <span className="text-gray-700">{it.name}</span>
+                <span className="font-semibold text-gray-900">×{it.qty}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {order.lastModification && (
+        <div className="mt-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl p-3">
+          ✏️ Ordine modificato dalla lavanderia: {order.lastModification}
+        </div>
+      )}
+
       <div className="mt-3">
         <StatusDot status={order.status} forClient />
       </div>
@@ -2808,6 +3322,31 @@ export default function App() {
       await api.addCatalogItemForClient(clientId, fields);
       await refresh();
     },
+    updateCatalogItemWeight: async (itemId, weightKg) => {
+      const res = await api.updateCatalogItemWeight(itemId, weightKg);
+      await refresh();
+      return res;
+    },
+    deleteCatalogItem: async (itemId) => {
+      const res = await api.deleteCatalogItem(itemId);
+      await refresh();
+      return res;
+    },
+    deleteClient: async (clientId) => {
+      const res = await api.deleteClient(clientId);
+      await refresh();
+      return res;
+    },
+    createReturn: async (fields) => {
+      const res = await api.createReturn(fields);
+      await refresh();
+      return res;
+    },
+    applyReturnsToOrder: async (returnIds, orderId) => {
+      const res = await api.applyReturnsToOrder(returnIds, orderId);
+      await refresh();
+      return res;
+    },
     addOrder: async (payload) => {
       await api.createOrder(payload);
       await refresh();
@@ -2848,6 +3387,11 @@ export default function App() {
     setOrderNote: async (orderId, note) => {
       await api.setOrderNote(orderId, note);
       await refresh();
+    },
+    toggleInvoiced: async (orderId, value) => {
+      const res = await api.toggleInvoiced(orderId, value);
+      await refresh();
+      return res;
     },
     sendOrderMessage: async (orderId, sender, message) => {
       const res = await api.sendOrderMessage(orderId, sender, message);

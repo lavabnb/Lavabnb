@@ -153,6 +153,7 @@ export async function fetchAll() {
     id: c.id,
     userId: c.user_id,
     name: c.name,
+    vatEnabled: !!c.vat_enabled,
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
     ),
@@ -171,6 +172,7 @@ export async function fetchAll() {
     clientId: o.client_id,
     createdDate: o.created_date,
     status: o.status,
+    paymentStatus: o.payment_status || "da_pagare",
     deliveryDate: o.delivery_date,
     deliveryTime: o.delivery_time ? o.delivery_time.slice(0, 5) : null,
     note: o.note || "",
@@ -391,10 +393,18 @@ export async function scheduleOrder(orderId, date, time) {
     .update({ status: "programmato", delivery_date: date, delivery_time: time })
     .eq("id", orderId);
   if (clientId) {
-    await addNotification(
-      clientId,
-      `Il tuo ordine #${orderId} è stato programmato per il ${formatIT(date)} alle ${time}.`
-    );
+    const { data: slotRows } = await neon
+      .from("order_slots")
+      .select("slot_date, slot_time")
+      .eq("order_id", orderId);
+    const requested = slotRows || [];
+    const matches =
+      requested.length === 0 ||
+      requested.some((s) => s.slot_date === date && s.slot_time && s.slot_time.slice(0, 5) === time);
+    const message = matches
+      ? `Il tuo ordine #${orderId} è stato programmato per il ${formatIT(date)} alle ${time}.`
+      : `Il tuo ordine #${orderId} è stato programmato per il ${formatIT(date)} alle ${time} — orario diverso da quello che avevi richiesto. Scrivici nei messaggi dell'ordine se hai bisogno di riparlarne.`;
+    await addNotification(clientId, message);
   }
 }
 
@@ -613,6 +623,49 @@ export async function toggleInvoiced(orderId, value) {
     return { ok: true };
   } catch (e) {
     console.error("toggleInvoiced error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+export async function declarePaid(orderId) {
+  try {
+    const { error } = await neon
+      .from("orders")
+      .update({ payment_status: "dichiarato_pagato" })
+      .eq("id", orderId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("declarePaid error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+export async function confirmPayment(orderId) {
+  try {
+    const clientId = await getOrderClientId(orderId);
+    const { error } = await neon
+      .from("orders")
+      .update({ payment_status: "saldato" })
+      .eq("id", orderId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    if (clientId) {
+      await addNotification(clientId, `Il tuo ordine #${orderId} risulta saldato. Grazie!`);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("confirmPayment error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+export async function setClientVat(clientId, enabled) {
+  try {
+    const { error } = await neon.from("clients").update({ vat_enabled: enabled }).eq("id", clientId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("setClientVat error:", e);
     return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }

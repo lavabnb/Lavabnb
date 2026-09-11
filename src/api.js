@@ -147,13 +147,13 @@ export async function fetchAll() {
     name: r.name,
     category: r.category,
     weightKg: Number(r.weight_kg),
+    clientId: r.client_id || null,
   }));
 
   const clients = (clientsRes.data || []).map((c) => ({
     id: c.id,
     userId: c.user_id,
     name: c.name,
-    vatEnabled: !!c.vat_enabled,
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
     ),
@@ -178,6 +178,7 @@ export async function fetchAll() {
     note: o.note || "",
     lastModification: o.last_modification || "",
     invoiced: !!o.invoiced,
+    staffMessageSeen: o.staff_message_seen !== false,
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -240,7 +241,7 @@ export async function removeClientItem(clientId, itemId) {
 export async function addCatalogItemForClient(clientId, { name, category, weightKg, price }) {
   const { data, error } = await neon
     .from("catalog_items")
-    .insert([{ name, category, weight_kg: weightKg }])
+    .insert([{ name, category, weight_kg: weightKg, client_id: clientId }])
     .select();
   if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione capo");
   const itemId = data[0].id;
@@ -342,11 +343,24 @@ export async function sendOrderMessage(orderId, sender, message) {
           `La lavanderia ha una richiesta per il tuo ordine #${orderId}. Guarda i messaggi sull'ordine.`
         );
       }
+    } else {
+      await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
     }
     return { ok: true };
   } catch (e) {
     console.error("sendOrderMessage error:", e);
     return { ok: false, error: "Errore nell'invio del messaggio: " + (e.message || String(e)) };
+  }
+}
+
+export async function markMessageSeen(orderId) {
+  try {
+    const { error } = await neon.from("orders").update({ staff_message_seen: true }).eq("id", orderId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("markMessageSeen error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }
 
@@ -589,6 +603,20 @@ export async function createReturn({ clientId, orderId, itemName, qty, amount, r
   }
 }
 
+export async function updateReturn(returnId, { qty, amount, reason, note }) {
+  try {
+    const { error } = await neon
+      .from("returns")
+      .update({ qty, amount, reason, note: note || "" })
+      .eq("id", returnId);
+    if (error) return { ok: false, error: "Non ho potuto salvare le modifiche: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("updateReturn error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function applyReturnsToOrder(returnIds, orderId) {
   try {
     const { data: returnRows } = await neon.from("returns").select("amount, client_id").in("id", returnIds);
@@ -659,13 +687,23 @@ export async function confirmPayment(orderId) {
   }
 }
 
-export async function setClientVat(clientId, enabled) {
+export async function rejectPayment(orderId) {
   try {
-    const { error } = await neon.from("clients").update({ vat_enabled: enabled }).eq("id", clientId);
+    const clientId = await getOrderClientId(orderId);
+    const { error } = await neon
+      .from("orders")
+      .update({ payment_status: "da_pagare" })
+      .eq("id", orderId);
     if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    if (clientId) {
+      await addNotification(
+        clientId,
+        `Il pagamento dichiarato per il tuo ordine #${orderId} non ci risulta. Controlla e riprova a saldarlo.`
+      );
+    }
     return { ok: true };
   } catch (e) {
-    console.error("setClientVat error:", e);
+    console.error("rejectPayment error:", e);
     return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }

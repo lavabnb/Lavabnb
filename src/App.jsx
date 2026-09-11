@@ -19,6 +19,7 @@ import {
   LogOut,
   ChevronDown,
   Settings,
+  X,
 } from "lucide-react";
 import * as api from "./api";
 
@@ -104,7 +105,7 @@ function isDeliverySoon(order) {
 function hasClientMessage(order) {
   const messages = order.messages || [];
   const last = messages[messages.length - 1];
-  return !!last && last.sender === "client";
+  return !!last && last.sender === "client" && order.staffMessageSeen === false;
 }
 
 // ---------- Catalogo & clienti (seed) ----------
@@ -252,7 +253,6 @@ function ClientDetailScreen({
   onUpdateWeight,
   onDeleteCatalogItem,
   onDeleteClient,
-  onSetVat,
 }) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
@@ -296,23 +296,8 @@ function ClientDetailScreen({
         </div>
       )}
 
-      <label className="flex items-center justify-between border border-gray-200 rounded-2xl p-4 mb-6 select-none">
-        <div>
-          <div className="text-sm font-bold text-gray-900">Mostra IVA al 22%</div>
-          <div className="text-xs text-gray-400 mt-0.5">
-            Informativa nella schermata "Da saldare" del cliente — non viene addebitata.
-          </div>
-        </div>
-        <input
-          type="checkbox"
-          checked={client.vatEnabled}
-          onChange={(e) => onSetVat(client.id, e.target.checked)}
-          className="w-5 h-5 accent-gray-900 shrink-0 ml-3"
-        />
-      </label>
-
       {CATEGORY_ORDER.map((cat) => {
-        const items = catalog.filter((it) => it.category === cat);
+        const items = catalog.filter((it) => it.category === cat && it.clientId === client.id);
         return (
           <div key={cat} className="mb-6">
             <div className="flex items-center gap-2 mb-2 text-sm font-bold text-gray-700">
@@ -587,7 +572,7 @@ function ConfirmDeliverButton({ orderId, onConfirm, className }) {
   );
 }
 
-function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
+function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail, onMarkMessageSeen }) {
   const [scheduling, setScheduling] = useState(false);
   const urgent = isUrgentOrder(order);
   const deliverySoon = isDeliverySoon(order);
@@ -609,8 +594,17 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
               </span>
             )}
             {clientMsg && (
-              <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-1 rounded-full flex items-center gap-1">
+              <span className="bg-blue-600 text-white text-[11px] font-bold pl-2 pr-1 py-1 rounded-full flex items-center gap-1">
                 <MessageSquare size={11} /> NUOVO MESSAGGIO
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkMessageSeen(order.id);
+                  }}
+                  className="ml-0.5 hover:bg-blue-700 rounded-full p-0.5"
+                >
+                  <X size={11} />
+                </button>
               </span>
             )}
           </div>
@@ -800,6 +794,99 @@ function ReturnForm({ order, onSubmit, onCancel }) {
   );
 }
 
+function EditReturnForm({ ret, onSubmit, onCancel }) {
+  const [qty, setQty] = useState(ret.qty);
+  const [amount, setAmount] = useState(ret.amount.toFixed(2));
+  const [reason, setReason] = useState(ret.reason);
+  const [note, setNote] = useState(ret.note || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const REASONS = [
+    { value: "lavaggio", label: "Lavaggio" },
+    { value: "cliente", label: "Cliente" },
+    { value: "qualita", label: "Qualità prodotto" },
+    { value: "altro", label: "Altro" },
+  ];
+
+  const submit = async () => {
+    setError("");
+    const numQty = parseInt(qty, 10) || 1;
+    const numAmount = toNumber(String(amount));
+    setBusy(true);
+    const res = await onSubmit({ qty: numQty, amount: numAmount, reason, note: note.trim() });
+    setBusy(false);
+    if (res && res.ok === false) setError(res.error);
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-3 mt-2">
+      <div className="text-sm font-bold text-gray-900 mb-2">Modifica reso — {ret.itemName}</div>
+      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+      <div className="flex gap-2 mb-2">
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-gray-500 mb-1">Quantità</div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => setQty(e.target.value.replace(/[^0-9]/g, ""))}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-gray-500 mb-1">Importo a credito €</div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+      <div className="text-xs font-semibold text-gray-500 mb-1">Causale</div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {REASONS.map((r) => (
+          <button
+            key={r.value}
+            onClick={() => setReason(r.value)}
+            className={`text-xs px-3 py-1.5 rounded-full border font-medium ${
+              reason === r.value
+                ? "bg-gray-900 text-white border-gray-900"
+                : "border-gray-300 text-gray-700"
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Note (facoltativo)"
+        rows={2}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+      />
+      <div className="flex gap-2">
+        <button
+          disabled={busy}
+          onClick={submit}
+          className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+        >
+          Salva modifiche
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold"
+        >
+          Annulla
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrderDetailAdminScreen({
   order,
   clientName,
@@ -814,8 +901,10 @@ function OrderDetailAdminScreen({
   onDelete,
   onSendMessage,
   onCreateReturn,
+  onUpdateReturn,
   onApplyCredit,
   onConfirmPayment,
+  onRejectPayment,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -829,6 +918,9 @@ function OrderDetailAdminScreen({
   const urgent = isUrgentOrder(order);
   const isConsegnato = order.status === "consegnato";
   const availableCredits = (returns || []).filter((r) => r.clientId === order.clientId && !r.applied);
+  const reportedOnThisOrder = (returns || []).filter((r) => r.orderId === order.id);
+  const appliedToThisOrder = (returns || []).filter((r) => r.appliedOrderId === order.id);
+  const [editingReturnId, setEditingReturnId] = useState(null);
 
   useEffect(() => {
     setDraftItems(order.items.map((it) => ({ ...it })));
@@ -997,6 +1089,53 @@ function OrderDetailAdminScreen({
         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm mb-6"
       />
 
+      {reportedOnThisOrder.length > 0 && (
+        <div className="border border-gray-200 rounded-xl p-3 mb-6">
+          <div className="text-sm font-bold text-gray-900 mb-2">Resi segnalati su questo ordine</div>
+          {reportedOnThisOrder.map((r) => (
+            <div key={r.id} className="border-t border-gray-100 pt-2 mt-2 first:border-0 first:pt-0 first:mt-0">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-700">
+                  {r.qty}× {r.itemName} — €{r.amount.toFixed(2)} ({REASON_LABELS[r.reason] || r.reason})
+                  {r.applied && <span className="text-emerald-600 font-medium"> · applicato</span>}
+                </div>
+                <button
+                  onClick={() => setEditingReturnId(editingReturnId === r.id ? null : r.id)}
+                  className="text-xs font-semibold text-gray-500 underline shrink-0 ml-2"
+                >
+                  Modifica
+                </button>
+              </div>
+              {r.note && <div className="text-xs text-gray-400 mt-0.5">{r.note}</div>}
+              {editingReturnId === r.id && (
+                <EditReturnForm
+                  ret={r}
+                  onSubmit={async (fields) => {
+                    const res = await onUpdateReturn(r.id, fields);
+                    if (res && res.ok !== false) setEditingReturnId(null);
+                    return res;
+                  }}
+                  onCancel={() => setEditingReturnId(null)}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {appliedToThisOrder.length > 0 && (
+        <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 mb-6">
+          <div className="text-sm font-bold text-emerald-800 mb-2">
+            Credito reso applicato a questo ordine
+          </div>
+          {appliedToThisOrder.map((r) => (
+            <div key={r.id} className="text-sm text-emerald-800 py-0.5">
+              -€{r.amount.toFixed(2)} su {r.qty}× {r.itemName} ({REASON_LABELS[r.reason] || r.reason})
+            </div>
+          ))}
+        </div>
+      )}
+
       {availableCredits.length > 0 && (
         <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 mb-6">
           <div className="text-sm font-bold text-emerald-800 mb-2">
@@ -1042,12 +1181,20 @@ function OrderDetailAdminScreen({
               <div className="text-sm text-amber-600 font-medium mb-2">
                 Il cliente ha dichiarato di aver saldato — in attesa di conferma.
               </div>
-              <button
-                onClick={() => onConfirmPayment(order.id)}
-                className="w-full bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold"
-              >
-                Conferma saldo ricevuto
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onConfirmPayment(order.id)}
+                  className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold"
+                >
+                  Conferma saldo ricevuto
+                </button>
+                <button
+                  onClick={() => onRejectPayment(order.id)}
+                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
+                >
+                  Non risulta saldato
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -1112,35 +1259,34 @@ function OrderDetailAdminScreen({
         </button>
       )}
 
-      {order.status !== "consegnato" &&
-        (!confirmingDelete ? (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
-          >
-            <Trash2 size={14} /> Elimina ordine definitivamente
-          </button>
-        ) : (
-          <div className="border border-rose-200 rounded-xl p-3">
-            <div className="text-sm text-rose-600 font-semibold mb-2">
-              Sei sicuro? L'operazione non è reversibile.
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onDelete(order.id)}
-                className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-sm font-semibold"
-              >
-                Sì, elimina
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
-              >
-                Annulla
-              </button>
-            </div>
+      {!confirmingDelete ? (
+        <button
+          onClick={() => setConfirmingDelete(true)}
+          className="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+        >
+          <Trash2 size={14} /> Elimina ordine definitivamente
+        </button>
+      ) : (
+        <div className="border border-rose-200 rounded-xl p-3">
+          <div className="text-sm text-rose-600 font-semibold mb-2">
+            Sei sicuro? L'operazione non è reversibile.
           </div>
-        ))}
+          <div className="flex gap-2">
+            <button
+              onClick={() => onDelete(order.id)}
+              className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-sm font-semibold"
+            >
+              Sì, elimina
+            </button>
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
+            >
+              Annulla
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1155,6 +1301,7 @@ function DashboardScreen({
   onOpenDetail,
   onNewOrder,
   onLogout,
+  onMarkMessageSeen,
 }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const today = isoToday();
@@ -1285,6 +1432,7 @@ function DashboardScreen({
           onSchedule={onSchedule}
           onMarkDelivered={onMarkDelivered}
           onOpenDetail={onOpenDetail}
+          onMarkMessageSeen={onMarkMessageSeen}
         />
       ))}
     </div>
@@ -1460,7 +1608,7 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
   );
 }
 
-function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
+function ArchivioScreen({ orders, clients, onBack, onOpenDetail, onMarkMessageSeen }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const [query, setQuery] = useState("");
   const consegnati = orders
@@ -1498,9 +1646,23 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="font-bold text-gray-900">#{o.id}</span>
+              {o.invoiced && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                  FATTURATO
+                </span>
+              )}
               {hasClientMessage(o) && (
-                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="bg-blue-600 text-white text-[10px] font-bold pl-2 pr-1 py-0.5 rounded-full flex items-center gap-1">
                   <MessageSquare size={10} /> MESSAGGIO
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMarkMessageSeen(o.id);
+                    }}
+                    className="ml-0.5 hover:bg-blue-700 rounded-full p-0.5"
+                  >
+                    <X size={10} />
+                  </button>
                 </span>
               )}
             </div>
@@ -1645,6 +1807,7 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
   const totale = sorted.reduce((s, o) => s + o.total, 0);
   const daFatturare = sorted.filter((o) => !o.invoiced);
   const totaleDaFatturare = daFatturare.reduce((s, o) => s + o.total, 0);
+  const [confirmingId, setConfirmingId] = useState(null);
 
   return (
     <div className="px-6 pt-5 pb-8">
@@ -1671,15 +1834,107 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
                 {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
               </div>
             </button>
-            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-              <input
-                type="checkbox"
-                checked={o.invoiced}
-                onChange={(e) => onToggleInvoiced(o.id, e.target.checked)}
-                className="w-4 h-4 accent-gray-900"
-              />
-              Fatturato
-            </label>
+            {!o.invoiced && confirmingId === o.id ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-500">Confermi?</span>
+                <button
+                  onClick={() => {
+                    onToggleInvoiced(o.id, true);
+                    setConfirmingId(null);
+                  }}
+                  className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                >
+                  Sì
+                </button>
+                <button
+                  onClick={() => setConfirmingId(null)}
+                  className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                <input
+                  type="checkbox"
+                  checked={o.invoiced}
+                  onChange={(e) =>
+                    e.target.checked ? setConfirmingId(o.id) : onToggleInvoiced(o.id, false)
+                  }
+                  className="w-4 h-4 accent-gray-900"
+                />
+                Fatturato
+              </label>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DaFatturareScreen({ orders, clients, onBack, onOpenDetail, onToggleInvoiced }) {
+  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const list = orders
+    .filter((o) => o.status === "consegnato" && !o.invoiced)
+    .sort((a, b) => b.id - a.id);
+  const [confirmingId, setConfirmingId] = useState(null);
+  const totale = list.reduce((s, o) => s + o.total, 0);
+
+  return (
+    <div className="px-6 pt-5 pb-8">
+      <ScreenHeader title="Da Fatturare" subtitle="Ordini consegnati non ancora fatturati" onBack={onBack} />
+      <div className="mb-5">
+        <StatCard
+          value={`€${totale.toFixed(2)}`}
+          label={`Totale da fatturare (${list.length})`}
+          valueClass="text-amber-600"
+        />
+      </div>
+      {list.length === 0 && (
+        <p className="text-gray-400 text-sm py-8 text-center">Tutto fatturato! 🎉</p>
+      )}
+      {list.map((o) => (
+        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+          <div className="flex items-center justify-between">
+            <button onClick={() => onOpenDetail(o.id)} className="text-left">
+              <div className="font-bold text-gray-900 text-sm">
+                #{o.id} • {clientName(o.clientId)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
+              </div>
+            </button>
+            {confirmingId === o.id ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-500">Confermi?</span>
+                <button
+                  onClick={() => {
+                    onToggleInvoiced(o.id, true);
+                    setConfirmingId(null);
+                  }}
+                  className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                >
+                  Sì
+                </button>
+                <button
+                  onClick={() => setConfirmingId(null)}
+                  className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  onChange={() => setConfirmingId(o.id)}
+                  className="w-4 h-4 accent-gray-900"
+                />
+                Fatturato
+              </label>
+            )}
           </div>
         </div>
       ))}
@@ -1741,6 +1996,8 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
 
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingClientId, setViewingClientId] = useState(null);
+  const [viewingFatturare, setViewingFatturare] = useState(false);
+  const totaleDaFatturareGlobale = orders.filter((o) => o.status === "consegnato" && !o.invoiced);
   const searchResults =
     searchQuery.trim().length === 0
       ? []
@@ -1751,6 +2008,18 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
           })
           .sort((a, b) => b.id - a.id)
           .slice(0, 15);
+
+  if (viewingFatturare) {
+    return (
+      <DaFatturareScreen
+        orders={orders}
+        clients={clients}
+        onBack={() => setViewingFatturare(false)}
+        onOpenDetail={onOpenDetail}
+        onToggleInvoiced={onToggleInvoiced}
+      />
+    );
+  }
 
   if (viewingClientId) {
     return (
@@ -1768,6 +2037,19 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
   return (
     <div className="px-6 pt-5 pb-8">
       <ScreenHeader title="Statistiche" subtitle="Calcolate sulle consegne archiviate" />
+
+      <button
+        onClick={() => setViewingFatturare(true)}
+        className="w-full border border-amber-200 bg-amber-50 rounded-2xl p-4 mb-5 text-left flex items-center justify-between"
+      >
+        <div>
+          <div className="text-xs text-amber-700">Da Fatturare</div>
+          <div className="text-2xl font-bold mt-1 text-amber-700">
+            {totaleDaFatturareGlobale.length}
+          </div>
+        </div>
+        <ChevronDown size={18} className="text-amber-600 -rotate-90" />
+      </button>
 
       <div className="border border-gray-200 rounded-2xl p-4 mb-5">
         <div className="font-bold text-gray-900 mb-2 text-sm">Cerca un ordine</div>
@@ -1964,8 +2246,10 @@ function LavanderiaView({ data, actions }) {
             }}
             onSendMessage={actions.sendOrderMessage}
             onCreateReturn={actions.createReturn}
+            onUpdateReturn={actions.updateReturn}
             onApplyCredit={actions.applyReturnsToOrder}
             onConfirmPayment={actions.confirmPayment}
+            onRejectPayment={actions.rejectPayment}
           />
         </div>
         <BottomNav
@@ -1994,6 +2278,7 @@ function LavanderiaView({ data, actions }) {
         onOpenDetail={setDetailOrderId}
         onNewOrder={() => setCreatingOrder(true)}
         onLogout={actions.logout}
+        onMarkMessageSeen={actions.markMessageSeen}
       />
     );
   } else if (nav === "archivio") {
@@ -2003,6 +2288,7 @@ function LavanderiaView({ data, actions }) {
         clients={data.clients}
         onBack={() => setNav("dashboard")}
         onOpenDetail={setDetailOrderId}
+        onMarkMessageSeen={actions.markMessageSeen}
       />
     );
   } else if (nav === "clienti") {
@@ -2021,7 +2307,6 @@ function LavanderiaView({ data, actions }) {
           actions.deleteClient(id);
           setClientDetailId(null);
         }}
-        onSetVat={actions.setClientVat}
       />
     ) : (
       <ClientiListScreen
@@ -2285,6 +2570,10 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
             ))}
             {returnItemsToSend.length > 0 && (
               <>
+                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-2.5 mt-2 text-sm font-semibold text-emerald-700">
+                  Credito che riceverai: €
+                  {returnItemsToSend.reduce((s, it) => s + it.price * returnQtys[it.itemId], 0).toFixed(2)}
+                </div>
                 <div className="text-xs font-semibold text-gray-500 mt-3 mb-1.5">Motivo</div>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[
@@ -2436,13 +2725,14 @@ function OrderChat({ order, sender, onSend, readOnly }) {
   );
 }
 
-function ClienteOrderCard({ order, onSendMessage }) {
+function ClienteOrderCard({ order, onSendMessage, returns }) {
   const [showChat, setShowChat] = useState(false);
   const [showItems, setShowItems] = useState(false);
   const messages = order.messages || [];
   const lastMsg = messages[messages.length - 1];
   const isConsegnato = order.status === "consegnato";
   const hasStaffPing = !isConsegnato && lastMsg && lastMsg.sender === "staff";
+  const appliedCredits = (returns || []).filter((r) => r.appliedOrderId === order.id);
 
   return (
     <div className="border border-gray-200 rounded-2xl p-5 mb-4">
@@ -2452,6 +2742,16 @@ function ClienteOrderCard({ order, onSendMessage }) {
           {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
         </span>
       </div>
+
+      {appliedCredits.length > 0 && (
+        <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-lg p-2 text-xs text-emerald-700">
+          {appliedCredits.map((r) => (
+            <div key={r.id}>
+              💳 Credito reso applicato: -€{r.amount.toFixed(2)} su {r.qty}× {r.itemName}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-3 border border-gray-100 rounded-xl overflow-hidden">
         <button
@@ -2528,8 +2828,9 @@ function ClienteOrderCard({ order, onSendMessage }) {
   );
 }
 
-function SaldareScreen({ orders, vatEnabled, onDeclarePaid, onBack }) {
+function SaldareScreen({ orders, onDeclarePaid, onBack }) {
   const sorted = [...orders].sort((a, b) => b.id - a.id);
+  const [confirmingId, setConfirmingId] = useState(null);
 
   return (
     <div className="px-6 pt-5 pb-6 h-full overflow-y-auto">
@@ -2543,38 +2844,47 @@ function SaldareScreen({ orders, vatEnabled, onDeclarePaid, onBack }) {
           Nessun ordine da saldare al momento.
         </p>
       )}
-      {sorted.map((o) => {
-        const vat = o.total * 0.22;
-        const pending = o.paymentStatus === "dichiarato_pagato";
-        return (
-          <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-gray-900">#{o.id}</span>
-              <span className="text-sm text-gray-500">{formatIT(o.deliveryDate)}</span>
-            </div>
-            <div className="text-sm text-gray-700 mt-1">Totale: €{o.total.toFixed(2)}</div>
-            {vatEnabled && (
-              <div className="text-xs text-gray-400 mt-0.5">
-                IVA 22% (informativa, non addebitata): €{vat.toFixed(2)}
+      {sorted.map((o) => (
+        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-gray-900">#{o.id}</span>
+            <span className="text-sm text-gray-500">{formatIT(o.deliveryDate)}</span>
+          </div>
+          <div className="text-sm text-gray-700 mt-1">Totale: €{o.total.toFixed(2)}</div>
+          {confirmingId === o.id ? (
+            <div className="mt-3 bg-gray-50 rounded-xl p-3">
+              <div className="text-sm text-gray-700 mb-2">Confermi di aver saldato questo ordine?</div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    onDeclarePaid(o.id);
+                    setConfirmingId(null);
+                  }}
+                  className="flex-1 bg-gray-900 text-white rounded-lg py-1.5 text-sm font-semibold"
+                >
+                  Sì, ho saldato
+                </button>
+                <button
+                  onClick={() => setConfirmingId(null)}
+                  className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
+                >
+                  Annulla
+                </button>
               </div>
-            )}
+            </div>
+          ) : (
             <label className="flex items-center gap-2 mt-3 text-sm select-none">
               <input
                 type="checkbox"
-                checked={pending}
-                disabled={pending}
-                onChange={(e) => e.target.checked && onDeclarePaid(o.id)}
+                checked={false}
+                onChange={() => setConfirmingId(o.id)}
                 className="w-4 h-4 accent-gray-900"
               />
-              {pending ? (
-                <span className="text-amber-600 font-medium">In attesa di conferma dalla lavanderia</span>
-              ) : (
-                <span className="text-gray-700">Ho saldato questo ordine</span>
-              )}
+              <span className="text-gray-700">Ho saldato questo ordine</span>
             </label>
-          </div>
-        );
-      })}
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -3365,7 +3675,7 @@ function ClienteDashboard({ data, client, actions }) {
     .sort((a, b) => b.id - a.id);
   const active = myOrders.filter((o) => o.status !== "consegnato").length;
   const confermati = myOrders.filter((o) => o.status === "pronto" || o.status === "programmato").length;
-  const daSaldare = myOrders.filter((o) => o.status === "consegnato" && o.paymentStatus !== "saldato");
+  const daSaldare = myOrders.filter((o) => o.status === "consegnato" && o.paymentStatus === "da_pagare");
   const myNotifications = (data.notifications || []).filter((n) => n.clientId === client.id);
 
   const bottomItems = [
@@ -3417,7 +3727,6 @@ function ClienteDashboard({ data, client, actions }) {
     return (
       <SaldareScreen
         orders={daSaldare}
-        vatEnabled={client.vatEnabled}
         onDeclarePaid={actions.declarePaid}
         onBack={() => setSubScreen("dashboard")}
       />
@@ -3436,7 +3745,7 @@ function ClienteDashboard({ data, client, actions }) {
           <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine ancora.</p>
         )}
         {myOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} />
+          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} returns={data.returns} />
         ))}
       </div>
     );
@@ -3507,7 +3816,7 @@ function ClienteDashboard({ data, client, actions }) {
           </p>
         )}
         {activeOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} />
+          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} returns={data.returns} />
         ))}
       </div>
 
@@ -3588,6 +3897,11 @@ export default function App() {
       await refresh();
       return res;
     },
+    updateReturn: async (returnId, fields) => {
+      const res = await api.updateReturn(returnId, fields);
+      await refresh();
+      return res;
+    },
     applyReturnsToOrder: async (returnIds, orderId) => {
       const res = await api.applyReturnsToOrder(returnIds, orderId);
       await refresh();
@@ -3649,13 +3963,18 @@ export default function App() {
       await refresh();
       return res;
     },
-    setClientVat: async (clientId, enabled) => {
-      const res = await api.setClientVat(clientId, enabled);
+    rejectPayment: async (orderId) => {
+      const res = await api.rejectPayment(orderId);
       await refresh();
       return res;
     },
     sendOrderMessage: async (orderId, sender, message) => {
       const res = await api.sendOrderMessage(orderId, sender, message);
+      await refresh();
+      return res;
+    },
+    markMessageSeen: async (orderId) => {
+      const res = await api.markMessageSeen(orderId);
       await refresh();
       return res;
     },

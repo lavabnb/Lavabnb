@@ -154,6 +154,7 @@ export async function fetchAll() {
     id: c.id,
     userId: c.user_id,
     name: c.name,
+    paymentMethod: c.payment_method || "contanti",
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
     ),
@@ -179,6 +180,7 @@ export async function fetchAll() {
     lastModification: o.last_modification || "",
     invoiced: !!o.invoiced,
     staffMessageSeen: o.staff_message_seen !== false,
+    paymentMethod: o.payment_method || "contanti",
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -248,6 +250,17 @@ export async function addCatalogItemForClient(clientId, { name, category, weight
   await neon.from("client_pricing").insert([{ client_id: clientId, item_id: itemId, price }]);
 }
 
+export async function setClientPaymentMethod(clientId, method) {
+  try {
+    const { error } = await neon.from("clients").update({ payment_method: method }).eq("id", clientId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("setClientPaymentMethod error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function completeProfile(clientId, fields) {
   try {
     const { error } = await neon
@@ -305,10 +318,10 @@ export async function addNotification(clientId, message) {
 
 // ---------------- Ordini ----------------
 
-export async function createOrder({ clientId, items, total, preferredSlots, note }) {
+export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod }) {
   const { data, error } = await neon
     .from("orders")
-    .insert([{ client_id: clientId, total, status: "nuovo", note: note || "" }])
+    .insert([{ client_id: clientId, total, status: "nuovo", note: note || "", payment_method: paymentMethod || "contanti" }])
     .select();
   if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione ordine");
   const orderId = data[0].id;
@@ -321,6 +334,26 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
     await neon
       .from("order_slots")
       .insert(preferredSlots.map((s) => ({ order_id: orderId, slot_date: s.date, slot_time: s.time })));
+  }
+  if (returns && returns.length > 0) {
+    await neon.from("returns").insert(
+      returns.map((r) => ({
+        client_id: clientId,
+        order_id: r.orderId || null,
+        item_name: r.itemName,
+        qty: r.qty,
+        amount: r.amount,
+        reason: r.reason,
+        note: r.note || "",
+        applied: true,
+        applied_order_id: orderId,
+      }))
+    );
+    const creditTotal = returns.reduce((s, r) => s + r.amount, 0);
+    if (creditTotal > 0) {
+      const newTotal = Math.max(0, total - creditTotal);
+      await neon.from("orders").update({ total: newTotal }).eq("id", orderId);
+    }
   }
   await addNotification(clientId, `Il tuo ordine #${orderId} è stato ricevuto.`);
   return orderId;
@@ -364,7 +397,7 @@ export async function markMessageSeen(orderId) {
   }
 }
 
-export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime }) {
+export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod }) {
   const status = deliveryDate ? "programmato" : "nuovo";
   const { data, error } = await neon
     .from("orders")
@@ -375,6 +408,7 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
         status,
         delivery_date: deliveryDate || null,
         delivery_time: deliveryTime || null,
+        payment_method: paymentMethod || "contanti",
       },
     ])
     .select();
@@ -644,31 +678,6 @@ export async function setOrderNote(orderId, note) {
   await neon.from("orders").update({ note }).eq("id", orderId);
 }
 
-export async function toggleInvoiced(orderId, value) {
-  try {
-    const { error } = await neon.from("orders").update({ invoiced: value }).eq("id", orderId);
-    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
-    return { ok: true };
-  } catch (e) {
-    console.error("toggleInvoiced error:", e);
-    return { ok: false, error: "Errore: " + (e.message || String(e)) };
-  }
-}
-
-export async function declarePaid(orderId) {
-  try {
-    const { error } = await neon
-      .from("orders")
-      .update({ payment_status: "dichiarato_pagato" })
-      .eq("id", orderId);
-    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
-    return { ok: true };
-  } catch (e) {
-    console.error("declarePaid error:", e);
-    return { ok: false, error: "Errore: " + (e.message || String(e)) };
-  }
-}
-
 export async function confirmPayment(orderId) {
   try {
     const clientId = await getOrderClientId(orderId);
@@ -683,27 +692,6 @@ export async function confirmPayment(orderId) {
     return { ok: true };
   } catch (e) {
     console.error("confirmPayment error:", e);
-    return { ok: false, error: "Errore: " + (e.message || String(e)) };
-  }
-}
-
-export async function rejectPayment(orderId) {
-  try {
-    const clientId = await getOrderClientId(orderId);
-    const { error } = await neon
-      .from("orders")
-      .update({ payment_status: "da_pagare" })
-      .eq("id", orderId);
-    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
-    if (clientId) {
-      await addNotification(
-        clientId,
-        `Il pagamento dichiarato per il tuo ordine #${orderId} non ci risulta. Controlla e riprova a saldarlo.`
-      );
-    }
-    return { ok: true };
-  } catch (e) {
-    console.error("rejectPayment error:", e);
     return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }

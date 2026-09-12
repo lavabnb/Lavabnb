@@ -95,6 +95,7 @@ export async function signUpClient({
   billingName,
   billingVat,
   billingAddress,
+  clientType,
 }) {
   try {
     const signUpRes = await neon.auth.signUp.email({ email, password, name: businessName });
@@ -110,6 +111,7 @@ export async function signUpClient({
         billing_name: billingName,
         billing_vat: billingVat,
         billing_address: billingAddress,
+        client_type: clientType || "privato",
       },
     ]);
     if (error) {
@@ -155,6 +157,7 @@ export async function fetchAll() {
     userId: c.user_id,
     name: c.name,
     paymentMethod: c.payment_method || "contanti",
+    clientType: c.client_type || "privato",
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
     ),
@@ -207,6 +210,7 @@ export async function fetchAll() {
     clientId: n.client_id,
     message: n.message,
     createdAt: n.created_at,
+    audience: n.audience || "client",
   }));
 
   const returns = (returnsRes.data || []).map((r) => ({
@@ -221,6 +225,7 @@ export async function fetchAll() {
     applied: r.applied,
     appliedOrderId: r.applied_order_id,
     createdAt: r.created_at,
+    staffSeen: r.staff_seen !== false,
   }));
 
   const isStaff = (staffRes.data || []).length > 0;
@@ -272,6 +277,7 @@ export async function completeProfile(clientId, fields) {
         billing_name: fields.billingName,
         billing_vat: fields.billingVat,
         billing_address: fields.billingAddress,
+        client_type: fields.clientType || "privato",
       })
       .eq("id", clientId);
     if (error) {
@@ -297,6 +303,7 @@ export async function createClientProfile(userId, email, fields) {
         billing_name: fields.billingName,
         billing_vat: fields.billingVat,
         billing_address: fields.billingAddress,
+        client_type: fields.clientType || "privato",
       },
     ]);
     if (error) {
@@ -312,11 +319,34 @@ export async function createClientProfile(userId, email, fields) {
 
 // ---------------- Notifiche ----------------
 
-export async function addNotification(clientId, message) {
-  await neon.from("notifications").insert([{ client_id: clientId, message }]);
+export async function addNotification(clientId, message, audience = "client") {
+  await neon.from("notifications").insert([{ client_id: clientId, message, audience }]);
 }
 
 // ---------------- Ordini ----------------
+
+async function applyPendingCredit(clientId, orderId, currentTotal) {
+  const { data: pending } = await neon
+    .from("returns")
+    .select("id, amount")
+    .eq("client_id", clientId)
+    .eq("applied", false)
+    .order("created_at");
+  const rows = pending || [];
+  if (rows.length === 0) return currentTotal;
+  let remaining = currentTotal;
+  const usedIds = [];
+  for (const r of rows) {
+    if (remaining <= 0) break;
+    usedIds.push(r.id);
+    remaining = Math.max(0, remaining - Number(r.amount));
+  }
+  if (usedIds.length > 0) {
+    await neon.from("returns").update({ applied: true, applied_order_id: orderId }).in("id", usedIds);
+    await neon.from("orders").update({ total: remaining }).eq("id", orderId);
+  }
+  return remaining;
+}
 
 export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod }) {
   const { data, error } = await neon
@@ -335,6 +365,7 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
       .from("order_slots")
       .insert(preferredSlots.map((s) => ({ order_id: orderId, slot_date: s.date, slot_time: s.time })));
   }
+  let runningTotal = total;
   if (returns && returns.length > 0) {
     await neon.from("returns").insert(
       returns.map((r) => ({
@@ -347,14 +378,18 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
         note: r.note || "",
         applied: true,
         applied_order_id: orderId,
+        staff_seen: false,
       }))
     );
     const creditTotal = returns.reduce((s, r) => s + r.amount, 0);
     if (creditTotal > 0) {
-      const newTotal = Math.max(0, total - creditTotal);
-      await neon.from("orders").update({ total: newTotal }).eq("id", orderId);
+      runningTotal = Math.max(0, runningTotal - creditTotal);
+      await neon.from("orders").update({ total: runningTotal }).eq("id", orderId);
     }
   }
+  // Applica anche eventuale credito già disponibile da resi/aggiunte precedenti,
+  // senza mai riapplicare crediti già usati altrove (query fatta a insert avvenuto).
+  await applyPendingCredit(clientId, orderId, runningTotal);
   await addNotification(clientId, `Il tuo ordine #${orderId} è stato ricevuto.`);
   return orderId;
 }
@@ -397,6 +432,17 @@ export async function markMessageSeen(orderId) {
   }
 }
 
+export async function markReturnSeen(returnId) {
+  try {
+    const { error } = await neon.from("returns").update({ staff_seen: true }).eq("id", returnId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("markReturnSeen error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod }) {
   const status = deliveryDate ? "programmato" : "nuovo";
   const { data, error } = await neon
@@ -419,6 +465,7 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
       items.map((it) => ({ order_id: orderId, item_id: it.itemId, name: it.name, qty: it.qty, price: it.price }))
     );
   }
+  await applyPendingCredit(clientId, orderId, total);
   await addNotification(clientId, `La lavanderia ha registrato un nuovo ordine per te (#${orderId}).`);
   if (deliveryDate) {
     await addNotification(

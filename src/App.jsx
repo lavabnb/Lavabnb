@@ -254,6 +254,7 @@ function ClientDetailScreen({
   onDeleteCatalogItem,
   onDeleteClient,
   onSetPaymentMethod,
+  onAddCredit,
 }) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
@@ -261,6 +262,18 @@ function ClientDetailScreen({
   const [newPrice, setNewPrice] = useState("");
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState(null);
   const [confirmDeleteClient, setConfirmDeleteClient] = useState(false);
+  const [addingCredit, setAddingCredit] = useState(false);
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditNote, setCreditNote] = useState("");
+
+  const submitCredit = async () => {
+    const amount = toNumber(creditAmount);
+    if (amount <= 0) return;
+    await onAddCredit(client.id, amount, creditNote.trim());
+    setCreditAmount("");
+    setCreditNote("");
+    setAddingCredit(false);
+  };
 
   const submitNewItem = (category) => {
     if (!newName.trim() || !newWeight || !newPrice) return;
@@ -283,13 +296,18 @@ function ClientDetailScreen({
       {client.account ? (
         <div className="border border-gray-200 rounded-2xl p-4 mb-6 text-sm text-gray-600 space-y-1">
           <div className="font-bold text-gray-900 mb-1">Dati cliente</div>
+          <div>Tipo: {client.clientType === "azienda" ? "Azienda" : "Privato"}</div>
           <div>Email: {client.account.email}</div>
           <div>Telefono referente: {client.account.phone}</div>
           <div>Indirizzo di consegna: {client.account.deliveryAddress}</div>
-          <div>
-            Fatturazione: {client.account.billingName} — {client.account.billingVat}
-          </div>
-          <div>Indirizzo di fatturazione: {client.account.billingAddress}</div>
+          {client.clientType === "azienda" && (
+            <>
+              <div>
+                Fatturazione: {client.account.billingName} — {client.account.billingVat}
+              </div>
+              <div>Indirizzo di fatturazione: {client.account.billingAddress}</div>
+            </>
+          )}
         </div>
       ) : (
         <div className="border border-dashed border-gray-300 rounded-2xl p-4 mb-6 text-sm text-gray-400">
@@ -324,6 +342,56 @@ function ClientDetailScreen({
             Carta
           </button>
         </div>
+      </div>
+
+      <div className="border border-gray-200 rounded-2xl p-4 mb-6">
+        <div className="text-sm font-bold text-gray-900 mb-2">Credito cliente</div>
+        {!addingCredit ? (
+          <button
+            onClick={() => setAddingCredit(true)}
+            className="w-full border border-dashed border-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-semibold"
+          >
+            + Aggiungi credito manuale
+          </button>
+        ) : (
+          <div>
+            <p className="text-xs text-gray-400 mb-2">
+              Verrà scalato automaticamente dal prossimo ordine del cliente.
+            </p>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Importo €"
+              value={creditAmount}
+              onChange={(e) => setCreditAmount(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+            />
+            <input
+              placeholder="Motivo (es. reso ordine precedente)"
+              value={creditNote}
+              onChange={(e) => setCreditNote(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={submitCredit}
+                className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold"
+              >
+                Aggiungi
+              </button>
+              <button
+                onClick={() => {
+                  setAddingCredit(false);
+                  setCreditAmount("");
+                  setCreditNote("");
+                }}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold"
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {CATEGORY_ORDER.map((cat) => {
@@ -1323,6 +1391,7 @@ function OrderDetailAdminScreen({
 function DashboardScreen({
   orders,
   clients,
+  returns,
   onSchedule,
   onMarkReady,
   onMarkDelivered,
@@ -1331,6 +1400,7 @@ function DashboardScreen({
   onNewOrder,
   onLogout,
   onMarkMessageSeen,
+  onMarkReturnSeen,
 }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const today = isoToday();
@@ -1354,6 +1424,8 @@ function DashboardScreen({
     });
   const urgentPending = recenti.filter(isUrgentOrder).length;
   const pendingMessages = orders.filter(hasClientMessage);
+  const pendingReturns = (returns || []).filter((r) => !r.staffSeen);
+  const clientNameForReturn = (id) => clients.find((c) => c.id === id)?.name || "—";
 
   return (
     <div className="px-6 pt-5">
@@ -1419,6 +1491,27 @@ function DashboardScreen({
             {pendingMessages.length} {pendingMessages.length === 1 ? "ordine ha" : "ordini hanno"} un
             nuovo messaggio dal cliente da leggere
           </div>
+        </div>
+      )}
+
+      {pendingReturns.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-5">
+          <div className="flex items-center gap-2 text-amber-700 font-semibold mb-2">
+            <Bell size={16} /> Resi segnalati dai clienti
+          </div>
+          {pendingReturns.map((r) => (
+            <div key={r.id} className="flex items-center justify-between py-1.5 text-sm text-amber-700">
+              <span>
+                {clientNameForReturn(r.clientId)}: {r.qty}× {r.itemName} (-€{r.amount.toFixed(2)})
+              </span>
+              <button
+                onClick={() => onMarkReturnSeen(r.id)}
+                className="hover:bg-amber-100 rounded-full p-1 shrink-0 ml-2"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -2360,6 +2453,7 @@ function LavanderiaView({ data, actions }) {
       <DashboardScreen
         orders={data.orders}
         clients={data.clients}
+        returns={data.returns}
         onSchedule={actions.scheduleOrder}
         onMarkReady={actions.markReady}
         onMarkDelivered={actions.markDelivered}
@@ -2368,6 +2462,7 @@ function LavanderiaView({ data, actions }) {
         onNewOrder={() => setCreatingOrder(true)}
         onLogout={actions.logout}
         onMarkMessageSeen={actions.markMessageSeen}
+        onMarkReturnSeen={actions.markReturnSeen}
       />
     );
   } else if (nav === "archivio") {
@@ -2397,6 +2492,17 @@ function LavanderiaView({ data, actions }) {
           setClientDetailId(null);
         }}
         onSetPaymentMethod={actions.setClientPaymentMethod}
+        onAddCredit={(clientId, amount, note) =>
+          actions.createReturn({
+            clientId,
+            orderId: null,
+            itemName: "Credito manuale",
+            qty: 1,
+            amount,
+            reason: "altro",
+            note,
+          })
+        }
       />
     ) : (
       <ClientiListScreen
@@ -2828,6 +2934,7 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
   const isConsegnato = order.status === "consegnato";
   const hasStaffPing = !isConsegnato && lastMsg && lastMsg.sender === "staff";
   const appliedCredits = (returns || []).filter((r) => r.appliedOrderId === order.id);
+  const returnedFromThisOrder = (returns || []).filter((r) => r.orderId === order.id);
 
   return (
     <div className="border border-gray-200 rounded-2xl p-5 mb-4">
@@ -2871,6 +2978,19 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
                 <span className="font-semibold text-gray-900">×{it.qty}</span>
               </div>
             ))}
+            {returnedFromThisOrder.length > 0 && (
+              <div className="pt-2">
+                <div className="text-[11px] font-bold text-gray-400 uppercase mb-1">Resi richiesti</div>
+                {returnedFromThisOrder.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between py-1 text-sm">
+                    <span className="text-gray-700">{r.itemName}</span>
+                    <span className="font-semibold text-gray-900">
+                      ×{r.qty} (-€{r.amount.toFixed(2)})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2970,11 +3090,11 @@ function SaldareScreen({ orders, onBack }) {
   );
 }
 
-function MessaggiScreen({ notifications }) {
+function MessaggiScreen({ notifications, title = "Messaggi", subtitle = "Notifiche sulle azioni relative ai tuoi ordini" }) {
   const sorted = [...notifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return (
     <div className="px-6 pt-5">
-      <ScreenHeader title="Messaggi" subtitle="Notifiche sulle azioni relative ai tuoi ordini" />
+      <ScreenHeader title={title} subtitle={subtitle} />
       {sorted.length === 0 && (
         <p className="text-gray-400 text-sm py-8 text-center">Nessuna notifica per ora.</p>
       )}
@@ -3200,6 +3320,7 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
   const [loginPassword, setLoginPassword] = useState("");
 
   const [businessName, setBusinessName] = useState("");
+  const [clientType, setClientType] = useState("privato");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -3226,15 +3347,31 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
 
   const submitRegister = async () => {
     setError("");
-    if (
-      !businessName.trim() ||
-      !email.trim() ||
-      !deliveryAddress.trim() ||
-      !phone.trim() ||
-      !billingVat.trim()
-    ) {
-      setError("Compila tutti i campi obbligatori.");
+    if (!businessName.trim()) {
+      setError("Inserisci il nome della struttura.");
       return;
+    }
+    if (!email.trim()) {
+      setError("Inserisci un'email.");
+      return;
+    }
+    if (!deliveryAddress.trim()) {
+      setError("Inserisci l'indirizzo di consegna.");
+      return;
+    }
+    if (!phone.trim()) {
+      setError("Inserisci il telefono del referente.");
+      return;
+    }
+    if (clientType === "azienda") {
+      if (!billingName.trim()) {
+        setError("Inserisci la ragione sociale.");
+        return;
+      }
+      if (!/^\d{11}$/.test(billingVat.trim())) {
+        setError("Inserisci una partita IVA valida (11 cifre).");
+        return;
+      }
     }
     if (!password || password !== confirmPassword) {
       setError("Le password non coincidono.");
@@ -3244,13 +3381,15 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
     try {
       const res = await onRegister({
         businessName: businessName.trim(),
+        clientType,
         email: email.trim(),
         password,
         deliveryAddress: deliveryAddress.trim(),
         phone: phone.trim(),
-        billingName: billingName.trim() || businessName.trim(),
-        billingVat: billingVat.trim(),
-        billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
+        billingName: clientType === "azienda" ? billingName.trim() : "",
+        billingVat: clientType === "azienda" ? billingVat.trim() : "",
+        billingAddress:
+          clientType === "azienda" ? (sameAddress ? deliveryAddress.trim() : billingAddress.trim()) : "",
       });
       if (!res.ok) setError(res.error);
     } catch (e) {
@@ -3334,6 +3473,29 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
         </div>
       ) : (
         <div>
+          <div className="text-xs font-semibold text-gray-500 mb-2">Tipo di cliente</div>
+          <div className="flex gap-2 mb-3">
+            <button
+              onClick={() => setClientType("privato")}
+              className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+                clientType === "privato"
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "border-gray-300 text-gray-700"
+              }`}
+            >
+              Privato
+            </button>
+            <button
+              onClick={() => setClientType("azienda")}
+              className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+                clientType === "azienda"
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "border-gray-300 text-gray-700"
+              }`}
+            >
+              Azienda
+            </button>
+          </div>
           <input
             placeholder="Nome struttura (es. Hotel Sole)"
             value={businessName}
@@ -3375,37 +3537,41 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
           />
 
-          <div className="text-xs font-semibold text-gray-500 mt-2 mb-2">Dati di fatturazione</div>
-          <input
-            placeholder="Ragione sociale (se diversa dal nome struttura)"
-            value={billingName}
-            onChange={(e) => setBillingName(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-          />
-          <input
-            placeholder="Partita IVA / Codice Fiscale"
-            value={billingVat}
-            onChange={(e) => setBillingVat(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-          />
-          <label className="flex items-center gap-2 mb-3 select-none">
-            <input
-              type="checkbox"
-              checked={sameAddress}
-              onChange={(e) => setSameAddress(e.target.checked)}
-              className="w-4 h-4 accent-gray-900"
-            />
-            <span className="text-sm text-gray-600">
-              Indirizzo di fatturazione uguale a quello di consegna
-            </span>
-          </label>
-          {!sameAddress && (
-            <input
-              placeholder="Indirizzo di fatturazione"
-              value={billingAddress}
-              onChange={(e) => setBillingAddress(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-            />
+          {clientType === "azienda" && (
+            <>
+              <div className="text-xs font-semibold text-gray-500 mt-2 mb-2">Dati di fatturazione</div>
+              <input
+                placeholder="Ragione sociale"
+                value={billingName}
+                onChange={(e) => setBillingName(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+              />
+              <input
+                placeholder="Partita IVA (11 cifre)"
+                value={billingVat}
+                onChange={(e) => setBillingVat(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+              />
+              <label className="flex items-center gap-2 mb-3 select-none">
+                <input
+                  type="checkbox"
+                  checked={sameAddress}
+                  onChange={(e) => setSameAddress(e.target.checked)}
+                  className="w-4 h-4 accent-gray-900"
+                />
+                <span className="text-sm text-gray-600">
+                  Indirizzo di fatturazione uguale a quello di consegna
+                </span>
+              </label>
+              {!sameAddress && (
+                <input
+                  placeholder="Indirizzo di fatturazione"
+                  value={billingAddress}
+                  onChange={(e) => setBillingAddress(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+                />
+              )}
+            </>
           )}
 
           <button
@@ -3436,6 +3602,7 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
 
 function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
   const [businessName, setBusinessName] = useState(client.name || "");
+  const [clientType, setClientType] = useState(client.clientType || "privato");
   const [deliveryAddress, setDeliveryAddress] = useState(client.account.deliveryAddress || "");
   const [phone, setPhone] = useState(client.account.phone || "");
   const [billingName, setBillingName] = useState(client.account.billingName || "");
@@ -3451,18 +3618,38 @@ function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
   const submit = async () => {
     setError("");
     setSaved(false);
-    if (!deliveryAddress.trim() || !phone.trim() || !billingVat.trim()) {
-      setError("Compila tutti i campi obbligatori.");
+    if (!businessName.trim()) {
+      setError("Inserisci il nome della struttura.");
       return;
+    }
+    if (!deliveryAddress.trim()) {
+      setError("Inserisci l'indirizzo di consegna.");
+      return;
+    }
+    if (!phone.trim()) {
+      setError("Inserisci il telefono del referente.");
+      return;
+    }
+    if (clientType === "azienda") {
+      if (!billingName.trim()) {
+        setError("Inserisci la ragione sociale.");
+        return;
+      }
+      if (!/^\d{11}$/.test(billingVat.trim())) {
+        setError("Inserisci una partita IVA valida (11 cifre).");
+        return;
+      }
     }
     setBusy(true);
     const res = await onComplete({
       businessName: businessName.trim(),
+      clientType,
       deliveryAddress: deliveryAddress.trim(),
       phone: phone.trim(),
-      billingName: billingName.trim() || businessName.trim(),
-      billingVat: billingVat.trim(),
-      billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
+      billingName: clientType === "azienda" ? billingName.trim() : "",
+      billingVat: clientType === "azienda" ? billingVat.trim() : "",
+      billingAddress:
+        clientType === "azienda" ? (sameAddress ? deliveryAddress.trim() : billingAddress.trim()) : "",
     });
     setBusy(false);
     if (res && res.ok === false) setError(res.error);
@@ -3503,6 +3690,25 @@ function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
           {error}
         </div>
       )}
+      <div className="text-xs font-semibold text-gray-500 mb-2">Tipo di cliente</div>
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => setClientType("privato")}
+          className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            clientType === "privato" ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
+          }`}
+        >
+          Privato
+        </button>
+        <button
+          onClick={() => setClientType("azienda")}
+          className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            clientType === "azienda" ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
+          }`}
+        >
+          Azienda
+        </button>
+      </div>
       <input
         placeholder="Nome struttura"
         value={businessName}
@@ -3521,36 +3727,40 @@ function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
         onChange={(e) => setPhone(e.target.value)}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
       />
-      <input
-        placeholder="Ragione sociale (fatturazione)"
-        value={billingName}
-        onChange={(e) => setBillingName(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-      />
-      <input
-        placeholder="Partita IVA / Codice Fiscale"
-        value={billingVat}
-        onChange={(e) => setBillingVat(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-      />
-      <label className="flex items-center gap-2 mb-3 select-none">
-        <input
-          type="checkbox"
-          checked={sameAddress}
-          onChange={(e) => setSameAddress(e.target.checked)}
-          className="w-4 h-4 accent-gray-900"
-        />
-        <span className="text-sm text-gray-600">
-          Indirizzo di fatturazione uguale a quello di consegna
-        </span>
-      </label>
-      {!sameAddress && (
-        <input
-          placeholder="Indirizzo di fatturazione"
-          value={billingAddress}
-          onChange={(e) => setBillingAddress(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-        />
+      {clientType === "azienda" && (
+        <>
+          <input
+            placeholder="Ragione sociale"
+            value={billingName}
+            onChange={(e) => setBillingName(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <input
+            placeholder="Partita IVA (11 cifre)"
+            value={billingVat}
+            onChange={(e) => setBillingVat(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <label className="flex items-center gap-2 mb-3 select-none">
+            <input
+              type="checkbox"
+              checked={sameAddress}
+              onChange={(e) => setSameAddress(e.target.checked)}
+              className="w-4 h-4 accent-gray-900"
+            />
+            <span className="text-sm text-gray-600">
+              Indirizzo di fatturazione uguale a quello di consegna
+            </span>
+          </label>
+          {!sameAddress && (
+            <input
+              placeholder="Indirizzo di fatturazione"
+              value={billingAddress}
+              onChange={(e) => setBillingAddress(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+            />
+          )}
+        </>
       )}
       <button
         disabled={busy}
@@ -3565,6 +3775,7 @@ function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
 
 function RecoverProfileScreen({ email, onComplete, onLogout }) {
   const [businessName, setBusinessName] = useState("");
+  const [clientType, setClientType] = useState("privato");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [billingName, setBillingName] = useState("");
@@ -3576,19 +3787,39 @@ function RecoverProfileScreen({ email, onComplete, onLogout }) {
 
   const submit = async () => {
     setError("");
-    if (!businessName.trim() || !deliveryAddress.trim() || !phone.trim() || !billingVat.trim()) {
-      setError("Compila tutti i campi obbligatori.");
+    if (!businessName.trim()) {
+      setError("Inserisci il nome della struttura.");
       return;
+    }
+    if (!deliveryAddress.trim()) {
+      setError("Inserisci l'indirizzo di consegna.");
+      return;
+    }
+    if (!phone.trim()) {
+      setError("Inserisci il telefono del referente.");
+      return;
+    }
+    if (clientType === "azienda") {
+      if (!billingName.trim()) {
+        setError("Inserisci la ragione sociale.");
+        return;
+      }
+      if (!/^\d{11}$/.test(billingVat.trim())) {
+        setError("Inserisci una partita IVA valida (11 cifre).");
+        return;
+      }
     }
     setBusy(true);
     try {
       const res = await onComplete({
         businessName: businessName.trim(),
+        clientType,
         deliveryAddress: deliveryAddress.trim(),
         phone: phone.trim(),
-        billingName: billingName.trim() || businessName.trim(),
-        billingVat: billingVat.trim(),
-        billingAddress: sameAddress ? deliveryAddress.trim() : billingAddress.trim(),
+        billingName: clientType === "azienda" ? billingName.trim() : "",
+        billingVat: clientType === "azienda" ? billingVat.trim() : "",
+        billingAddress:
+          clientType === "azienda" ? (sameAddress ? deliveryAddress.trim() : billingAddress.trim()) : "",
       });
       if (!res.ok) setError(res.error);
     } catch (e) {
@@ -3618,6 +3849,25 @@ function RecoverProfileScreen({ email, onComplete, onLogout }) {
           {error}
         </div>
       )}
+      <div className="text-xs font-semibold text-gray-500 mb-2">Tipo di cliente</div>
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => setClientType("privato")}
+          className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            clientType === "privato" ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
+          }`}
+        >
+          Privato
+        </button>
+        <button
+          onClick={() => setClientType("azienda")}
+          className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            clientType === "azienda" ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
+          }`}
+        >
+          Azienda
+        </button>
+      </div>
       <input
         placeholder="Nome struttura"
         value={businessName}
@@ -3636,36 +3886,40 @@ function RecoverProfileScreen({ email, onComplete, onLogout }) {
         onChange={(e) => setPhone(e.target.value)}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
       />
-      <input
-        placeholder="Ragione sociale (fatturazione)"
-        value={billingName}
-        onChange={(e) => setBillingName(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-      />
-      <input
-        placeholder="Partita IVA / Codice Fiscale"
-        value={billingVat}
-        onChange={(e) => setBillingVat(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-      />
-      <label className="flex items-center gap-2 mb-3 select-none">
-        <input
-          type="checkbox"
-          checked={sameAddress}
-          onChange={(e) => setSameAddress(e.target.checked)}
-          className="w-4 h-4 accent-gray-900"
-        />
-        <span className="text-sm text-gray-600">
-          Indirizzo di fatturazione uguale a quello di consegna
-        </span>
-      </label>
-      {!sameAddress && (
-        <input
-          placeholder="Indirizzo di fatturazione"
-          value={billingAddress}
-          onChange={(e) => setBillingAddress(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-        />
+      {clientType === "azienda" && (
+        <>
+          <input
+            placeholder="Ragione sociale"
+            value={billingName}
+            onChange={(e) => setBillingName(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <input
+            placeholder="Partita IVA (11 cifre)"
+            value={billingVat}
+            onChange={(e) => setBillingVat(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          <label className="flex items-center gap-2 mb-3 select-none">
+            <input
+              type="checkbox"
+              checked={sameAddress}
+              onChange={(e) => setSameAddress(e.target.checked)}
+              className="w-4 h-4 accent-gray-900"
+            />
+            <span className="text-sm text-gray-600">
+              Indirizzo di fatturazione uguale a quello di consegna
+            </span>
+          </label>
+          {!sameAddress && (
+            <input
+              placeholder="Indirizzo di fatturazione"
+              value={billingAddress}
+              onChange={(e) => setBillingAddress(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+            />
+          )}
+        </>
       )}
       <button
         disabled={busy}
@@ -3757,7 +4011,9 @@ function ClienteDashboard({ data, client, actions }) {
   const active = myOrders.filter((o) => o.status !== "consegnato").length;
   const confermati = myOrders.filter((o) => o.status === "pronto" || o.status === "programmato").length;
   const daSaldare = myOrders.filter((o) => o.status === "consegnato" && o.paymentStatus === "da_pagare");
-  const myNotifications = (data.notifications || []).filter((n) => n.clientId === client.id);
+  const myNotifications = (data.notifications || []).filter(
+    (n) => n.clientId === client.id && n.audience !== "staff"
+  );
 
   const bottomItems = [
     { key: "ordini", label: "Ordini", icon: <Shirt size={18} /> },
@@ -3783,11 +4039,8 @@ function ClienteDashboard({ data, client, actions }) {
         catalog={data.catalog}
         lastOrder={lastOrder}
         onBack={() => setSubScreen("dashboard")}
-        onCreate={({ returns, ...payload }) => {
+        onCreate={(payload) => {
           actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });
-          (returns || []).forEach((r) => {
-            actions.createReturn({ clientId: client.id, ...r });
-          });
           setSubScreen("dashboard");
         }}
       />
@@ -4045,6 +4298,11 @@ export default function App() {
     },
     markMessageSeen: async (orderId) => {
       const res = await api.markMessageSeen(orderId);
+      await refresh();
+      return res;
+    },
+    markReturnSeen: async (returnId) => {
+      const res = await api.markReturnSeen(returnId);
       await refresh();
       return res;
     },

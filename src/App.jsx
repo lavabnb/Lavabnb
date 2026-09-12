@@ -253,6 +253,7 @@ function ClientDetailScreen({
   onUpdateWeight,
   onDeleteCatalogItem,
   onDeleteClient,
+  onSetPaymentMethod,
 }) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
@@ -295,6 +296,35 @@ function ClientDetailScreen({
           Cliente aggiunto manualmente: non ha ancora registrato un account in app.
         </div>
       )}
+
+      <div className="border border-gray-200 rounded-2xl p-4 mb-6">
+        <div className="text-sm font-bold text-gray-900 mb-2">Metodo di pagamento preferito</div>
+        <p className="text-xs text-gray-400 mb-3">
+          Usato per i nuovi ordini. Cambiarlo non modifica gli ordini già creati.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onSetPaymentMethod(client.id, "contanti")}
+            className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+              client.paymentMethod === "contanti"
+                ? "bg-gray-900 text-white border-gray-900"
+                : "border-gray-300 text-gray-700"
+            }`}
+          >
+            Contanti
+          </button>
+          <button
+            onClick={() => onSetPaymentMethod(client.id, "carta")}
+            className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+              client.paymentMethod === "carta"
+                ? "bg-gray-900 text-white border-gray-900"
+                : "border-gray-300 text-gray-700"
+            }`}
+          >
+            Carta
+          </button>
+        </div>
+      </div>
 
       {CATEGORY_ORDER.map((cat) => {
         const items = catalog.filter((it) => it.category === cat && it.clientId === client.id);
@@ -904,7 +934,6 @@ function OrderDetailAdminScreen({
   onUpdateReturn,
   onApplyCredit,
   onConfirmPayment,
-  onRejectPayment,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1174,28 +1203,20 @@ function OrderDetailAdminScreen({
       {isConsegnato && (
         <div className="border border-gray-200 rounded-xl p-3 mb-6">
           <div className="text-sm font-bold text-gray-900 mb-2">Stato pagamento</div>
+          <div className="text-xs text-gray-400 mb-2">
+            Metodo: {order.paymentMethod === "carta" ? "Carta" : "Contanti"}
+          </div>
+          {order.paymentMethod === "carta" && (
+            <div className="mb-3">
+              <div className="text-sm text-gray-700">Totale servizi: €{order.total.toFixed(2)}</div>
+              <div className="text-xs text-gray-400">IVA 22%: €{(order.total * 0.22).toFixed(2)}</div>
+              <div className="text-sm font-bold text-gray-900 mt-0.5">
+                Totale: €{(order.total * 1.22).toFixed(2)}
+              </div>
+            </div>
+          )}
           {order.paymentStatus === "saldato" ? (
             <div className="text-sm text-emerald-600 font-medium">✔ Saldato</div>
-          ) : order.paymentStatus === "dichiarato_pagato" ? (
-            <>
-              <div className="text-sm text-amber-600 font-medium mb-2">
-                Il cliente ha dichiarato di aver saldato — in attesa di conferma.
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onConfirmPayment(order.id)}
-                  className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold"
-                >
-                  Conferma saldo ricevuto
-                </button>
-                <button
-                  onClick={() => onRejectPayment(order.id)}
-                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
-                >
-                  Non risulta saldato
-                </button>
-              </div>
-            </>
           ) : (
             <>
               <div className="text-sm text-gray-500 mb-2">Ancora da saldare.</div>
@@ -1597,6 +1618,7 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
               total,
               deliveryDate: scheduleNow ? date : null,
               deliveryTime: scheduleNow ? time : null,
+              paymentMethod: client.paymentMethod,
             });
           }}
           className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3.5 font-bold"
@@ -1646,9 +1668,13 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail, onMarkMessageSe
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="font-bold text-gray-900">#{o.id}</span>
-              {o.invoiced && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                  FATTURATO
+              {o.paymentStatus === "saldato" ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">
+                  SALDATO
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">
+                  DA SALDARE
                 </span>
               )}
               {hasClientMessage(o) && (
@@ -1798,26 +1824,26 @@ function CalendarioScreen({ orders, clients, onMarkDelivered, onOpenDetail }) {
 }
 
 // ================= STATISTICHE =================
-function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetail, onToggleInvoiced }) {
+function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetail, onConfirmPayment }) {
   const sorted = [...orders].sort((a, b) => {
     const da = `${a.deliveryDate}T${a.deliveryTime || "00:00"}`;
     const db = `${b.deliveryDate}T${b.deliveryTime || "00:00"}`;
     return db.localeCompare(da);
   });
   const totale = sorted.reduce((s, o) => s + o.total, 0);
-  const daFatturare = sorted.filter((o) => !o.invoiced);
-  const totaleDaFatturare = daFatturare.reduce((s, o) => s + o.total, 0);
+  const daSaldare = sorted.filter((o) => o.paymentStatus !== "saldato");
+  const totaleDaSaldare = daSaldare.reduce((s, o) => s + o.total, 0);
   const [confirmingId, setConfirmingId] = useState(null);
 
   return (
     <div className="px-6 pt-5 pb-8">
-      <ScreenHeader title={clientName} subtitle="Ordini consegnati e stato fatturazione" onBack={onBack} />
+      <ScreenHeader title={clientName} subtitle="Ordini consegnati e stato pagamento" onBack={onBack} />
 
       <div className="grid grid-cols-2 gap-3 mb-5">
         <StatCard value={`€${totale.toFixed(2)}`} label="Totale consegnato" />
         <StatCard
-          value={`€${totaleDaFatturare.toFixed(2)}`}
-          label={`Da fatturare (${daFatturare.length})`}
+          value={`€${totaleDaSaldare.toFixed(2)}`}
+          label={`Da saldare (${daSaldare.length})`}
           valueClass="text-amber-600"
         />
       </div>
@@ -1825,124 +1851,134 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
       {sorted.length === 0 && (
         <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine consegnato ancora.</p>
       )}
-      {sorted.map((o) => (
-        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
-          <div className="flex items-center justify-between">
-            <button onClick={() => onOpenDetail(o.id)} className="text-left">
-              <div className="font-bold text-gray-900 text-sm">#{o.id}</div>
-              <div className="text-xs text-gray-400">
-                {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
-              </div>
-            </button>
-            {!o.invoiced && confirmingId === o.id ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-500">Confermi?</span>
+      {sorted.map((o) => {
+        const saldato = o.paymentStatus === "saldato";
+        return (
+          <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <button onClick={() => onOpenDetail(o.id)} className="text-left">
+                <div className="font-bold text-gray-900 text-sm">
+                  #{o.id} <span className="text-gray-400 font-normal">({o.paymentMethod})</span>
+                </div>
+                <div className="text-xs text-gray-400">
+                  {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
+                </div>
+              </button>
+              {!saldato && confirmingId === o.id ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">Confermi?</span>
+                  <button
+                    onClick={() => {
+                      onConfirmPayment(o.id);
+                      setConfirmingId(null);
+                    }}
+                    className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                  >
+                    Sì
+                  </button>
+                  <button
+                    onClick={() => setConfirmingId(null)}
+                    className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : saldato ? (
+                <span className="text-xs font-semibold text-emerald-600">✔ Saldato</span>
+              ) : (
                 <button
-                  onClick={() => {
-                    onToggleInvoiced(o.id, true);
-                    setConfirmingId(null);
-                  }}
-                  className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                  onClick={() => setConfirmingId(o.id)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800 shrink-0"
                 >
-                  Sì
+                  Saldato
                 </button>
-                <button
-                  onClick={() => setConfirmingId(null)}
-                  className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
-                >
-                  No
-                </button>
-              </div>
-            ) : (
-              <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-                <input
-                  type="checkbox"
-                  checked={o.invoiced}
-                  onChange={(e) =>
-                    e.target.checked ? setConfirmingId(o.id) : onToggleInvoiced(o.id, false)
-                  }
-                  className="w-4 h-4 accent-gray-900"
-                />
-                Fatturato
-              </label>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-function DaFatturareScreen({ orders, clients, onBack, onOpenDetail, onToggleInvoiced }) {
+function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBack, onOpenDetail, onConfirmPayment }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const list = orders
-    .filter((o) => o.status === "consegnato" && !o.invoiced)
+    .filter((o) => o.status === "consegnato" && o.paymentMethod === method && o.paymentStatus !== "saldato")
     .sort((a, b) => b.id - a.id);
   const [confirmingId, setConfirmingId] = useState(null);
-  const totale = list.reduce((s, o) => s + o.total, 0);
+  const isCarta = method === "carta";
+  const totale = list.reduce((s, o) => s + o.total * (isCarta ? 1.22 : 1), 0);
 
   return (
     <div className="px-6 pt-5 pb-8">
-      <ScreenHeader title="Da Fatturare" subtitle="Ordini consegnati non ancora fatturati" onBack={onBack} />
+      <ScreenHeader title={title} subtitle={subtitle} onBack={onBack} />
       <div className="mb-5">
         <StatCard
           value={`€${totale.toFixed(2)}`}
-          label={`Totale da fatturare (${list.length})`}
+          label={`Totale da incassare (${list.length})`}
           valueClass="text-amber-600"
         />
       </div>
       {list.length === 0 && (
-        <p className="text-gray-400 text-sm py-8 text-center">Tutto fatturato! 🎉</p>
+        <p className="text-gray-400 text-sm py-8 text-center">Niente in sospeso! 🎉</p>
       )}
-      {list.map((o) => (
-        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
-          <div className="flex items-center justify-between">
-            <button onClick={() => onOpenDetail(o.id)} className="text-left">
-              <div className="font-bold text-gray-900 text-sm">
-                #{o.id} • {clientName(o.clientId)}
-              </div>
-              <div className="text-xs text-gray-400">
-                {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
-              </div>
-            </button>
-            {confirmingId === o.id ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-500">Confermi?</span>
+      {list.map((o) => {
+        const iva = o.total * 0.22;
+        return (
+          <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <button onClick={() => onOpenDetail(o.id)} className="text-left">
+                <div className="font-bold text-gray-900 text-sm">
+                  #{o.id} • {clientName(o.clientId)}
+                </div>
+                {isCarta ? (
+                  <div className="text-xs text-gray-400">
+                    {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)} + IVA €{iva.toFixed(2)} = €
+                    {(o.total + iva).toFixed(2)}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400">
+                    {formatIT(o.deliveryDate)} • €{o.total.toFixed(2)}
+                  </div>
+                )}
+              </button>
+              {confirmingId === o.id ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">Confermi?</span>
+                  <button
+                    onClick={() => {
+                      onConfirmPayment(o.id);
+                      setConfirmingId(null);
+                    }}
+                    className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                  >
+                    Sì
+                  </button>
+                  <button
+                    onClick={() => setConfirmingId(null)}
+                    className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
                 <button
-                  onClick={() => {
-                    onToggleInvoiced(o.id, true);
-                    setConfirmingId(null);
-                  }}
-                  className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                  onClick={() => setConfirmingId(o.id)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800 shrink-0"
                 >
-                  Sì
+                  Saldato
                 </button>
-                <button
-                  onClick={() => setConfirmingId(null)}
-                  className="border border-gray-300 text-xs font-semibold rounded-lg px-2.5 py-1.5 text-gray-700"
-                >
-                  No
-                </button>
-              </div>
-            ) : (
-              <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-                <input
-                  type="checkbox"
-                  checked={false}
-                  onChange={() => setConfirmingId(o.id)}
-                  className="w-4 h-4 accent-gray-900"
-                />
-                Fatturato
-              </label>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onToggleInvoiced }) {
+function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment }) {
   const weightOf = (itemId) => catalog.find((c) => c.id === itemId)?.weightKg || 0;
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const consegnati = orders.filter((o) => o.status === "consegnato");
@@ -1965,7 +2001,7 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
       perCliente[cName] = { pezzi: 0, kg: 0, entrate: 0, clientId: o.clientId, daFatturare: 0, daFatturareCount: 0 };
     }
     perCliente[cName].entrate += o.total;
-    if (!o.invoiced) {
+    if (o.paymentStatus !== "saldato") {
       perCliente[cName].daFatturare += o.total;
       perCliente[cName].daFatturareCount += 1;
     }
@@ -1997,7 +2033,13 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingClientId, setViewingClientId] = useState(null);
   const [viewingFatturare, setViewingFatturare] = useState(false);
-  const totaleDaFatturareGlobale = orders.filter((o) => o.status === "consegnato" && !o.invoiced);
+  const [viewingSaldare, setViewingSaldare] = useState(false);
+  const daSaldareContantiGlobale = orders.filter(
+    (o) => o.status === "consegnato" && o.paymentMethod === "contanti" && o.paymentStatus !== "saldato"
+  );
+  const daFatturareCartaGlobale = orders.filter(
+    (o) => o.status === "consegnato" && o.paymentMethod === "carta" && o.paymentStatus !== "saldato"
+  );
   const searchResults =
     searchQuery.trim().length === 0
       ? []
@@ -2011,12 +2053,30 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
 
   if (viewingFatturare) {
     return (
-      <DaFatturareScreen
+      <PendingPaymentsScreen
         orders={orders}
         clients={clients}
+        method="carta"
+        title="Da Fatturare"
+        subtitle="Ordini pagati con carta non ancora confermati"
         onBack={() => setViewingFatturare(false)}
         onOpenDetail={onOpenDetail}
-        onToggleInvoiced={onToggleInvoiced}
+        onConfirmPayment={onConfirmPayment}
+      />
+    );
+  }
+
+  if (viewingSaldare) {
+    return (
+      <PendingPaymentsScreen
+        orders={orders}
+        clients={clients}
+        method="contanti"
+        title="Da Saldare"
+        subtitle="Ordini in contanti non ancora confermati"
+        onBack={() => setViewingSaldare(false)}
+        onOpenDetail={onOpenDetail}
+        onConfirmPayment={onConfirmPayment}
       />
     );
   }
@@ -2029,7 +2089,7 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
         orders={orders.filter((o) => o.clientId === viewingClientId && o.status === "consegnato")}
         onBack={() => setViewingClientId(null)}
         onOpenDetail={onOpenDetail}
-        onToggleInvoiced={onToggleInvoiced}
+        onConfirmPayment={onConfirmPayment}
       />
     );
   }
@@ -2038,18 +2098,22 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
     <div className="px-6 pt-5 pb-8">
       <ScreenHeader title="Statistiche" subtitle="Calcolate sulle consegne archiviate" />
 
-      <button
-        onClick={() => setViewingFatturare(true)}
-        className="w-full border border-amber-200 bg-amber-50 rounded-2xl p-4 mb-5 text-left flex items-center justify-between"
-      >
-        <div>
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <button
+          onClick={() => setViewingSaldare(true)}
+          className="border border-amber-200 bg-amber-50 rounded-2xl p-4 text-left"
+        >
+          <div className="text-xs text-amber-700">Da Saldare</div>
+          <div className="text-2xl font-bold mt-1 text-amber-700">{daSaldareContantiGlobale.length}</div>
+        </button>
+        <button
+          onClick={() => setViewingFatturare(true)}
+          className="border border-amber-200 bg-amber-50 rounded-2xl p-4 text-left"
+        >
           <div className="text-xs text-amber-700">Da Fatturare</div>
-          <div className="text-2xl font-bold mt-1 text-amber-700">
-            {totaleDaFatturareGlobale.length}
-          </div>
-        </div>
-        <ChevronDown size={18} className="text-amber-600 -rotate-90" />
-      </button>
+          <div className="text-2xl font-bold mt-1 text-amber-700">{daFatturareCartaGlobale.length}</div>
+        </button>
+      </div>
 
       <div className="border border-gray-200 rounded-2xl p-4 mb-5">
         <div className="font-bold text-gray-900 mb-2 text-sm">Cerca un ordine</div>
@@ -2249,7 +2313,6 @@ function LavanderiaView({ data, actions }) {
             onUpdateReturn={actions.updateReturn}
             onApplyCredit={actions.applyReturnsToOrder}
             onConfirmPayment={actions.confirmPayment}
-            onRejectPayment={actions.rejectPayment}
           />
         </div>
         <BottomNav
@@ -2307,6 +2370,7 @@ function LavanderiaView({ data, actions }) {
           actions.deleteClient(id);
           setClientDetailId(null);
         }}
+        onSetPaymentMethod={actions.setClientPaymentMethod}
       />
     ) : (
       <ClientiListScreen
@@ -2332,7 +2396,7 @@ function LavanderiaView({ data, actions }) {
         catalog={data.catalog}
         returns={data.returns}
         onOpenDetail={setDetailOrderId}
-        onToggleInvoiced={actions.toggleInvoiced}
+        onConfirmPayment={actions.confirmPayment}
       />
     );
   }
@@ -2623,10 +2687,15 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
       </div>
 
       <div className="px-6 pb-6 pt-2 border-t border-gray-100">
-        <div className="flex items-center justify-between mb-3 text-sm text-gray-600">
+        <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
           <span>{itemCount} capi selezionati</span>
           <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
         </div>
+        {client.paymentMethod === "carta" && (
+          <div className="text-xs text-gray-400 text-right mb-2">
+            IVA 22%: €{(total * 0.22).toFixed(2)} — Totale con IVA: €{(total * 1.22).toFixed(2)}
+          </div>
+        )}
         <button
           disabled={itemCount === 0 || hasInvalidSlot || validSlots.length === 0}
           onClick={() => {
@@ -2742,6 +2811,11 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
           {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
         </span>
       </div>
+      {order.paymentMethod === "carta" && (
+        <div className="text-xs text-gray-400 text-right -mt-1 mb-1">
+          + IVA 22% (€{(order.total * 0.22).toFixed(2)}) = €{(order.total * 1.22).toFixed(2)} totale
+        </div>
+      )}
 
       {appliedCredits.length > 0 && (
         <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-lg p-2 text-xs text-emerald-700">
@@ -2828,15 +2902,14 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
   );
 }
 
-function SaldareScreen({ orders, onDeclarePaid, onBack }) {
+function SaldareScreen({ orders, onBack }) {
   const sorted = [...orders].sort((a, b) => b.id - a.id);
-  const [confirmingId, setConfirmingId] = useState(null);
 
   return (
     <div className="px-6 pt-5 pb-6 h-full overflow-y-auto">
       <ScreenHeader
         title="Da Saldare"
-        subtitle="Spunta gli ordini che hai già pagato"
+        subtitle="Ordini in attesa di conferma pagamento dalla lavanderia"
         onBack={onBack}
       />
       {sorted.length === 0 && (
@@ -2844,47 +2917,29 @@ function SaldareScreen({ orders, onDeclarePaid, onBack }) {
           Nessun ordine da saldare al momento.
         </p>
       )}
-      {sorted.map((o) => (
-        <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-gray-900">#{o.id}</span>
-            <span className="text-sm text-gray-500">{formatIT(o.deliveryDate)}</span>
-          </div>
-          <div className="text-sm text-gray-700 mt-1">Totale: €{o.total.toFixed(2)}</div>
-          {confirmingId === o.id ? (
-            <div className="mt-3 bg-gray-50 rounded-xl p-3">
-              <div className="text-sm text-gray-700 mb-2">Confermi di aver saldato questo ordine?</div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    onDeclarePaid(o.id);
-                    setConfirmingId(null);
-                  }}
-                  className="flex-1 bg-gray-900 text-white rounded-lg py-1.5 text-sm font-semibold"
-                >
-                  Sì, ho saldato
-                </button>
-                <button
-                  onClick={() => setConfirmingId(null)}
-                  className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
-                >
-                  Annulla
-                </button>
-              </div>
+      {sorted.map((o) => {
+        const isCarta = o.paymentMethod === "carta";
+        const iva = o.total * 0.22;
+        return (
+          <div key={o.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-gray-900">#{o.id}</span>
+              <span className="text-sm text-gray-500">{formatIT(o.deliveryDate)}</span>
             </div>
-          ) : (
-            <label className="flex items-center gap-2 mt-3 text-sm select-none">
-              <input
-                type="checkbox"
-                checked={false}
-                onChange={() => setConfirmingId(o.id)}
-                className="w-4 h-4 accent-gray-900"
-              />
-              <span className="text-gray-700">Ho saldato questo ordine</span>
-            </label>
-          )}
-        </div>
-      ))}
+            {isCarta ? (
+              <div className="mt-1">
+                <div className="text-sm text-gray-700">Totale servizi: €{o.total.toFixed(2)}</div>
+                <div className="text-xs text-gray-400">IVA 22%: €{iva.toFixed(2)}</div>
+                <div className="text-sm font-bold text-gray-900 mt-0.5">
+                  Totale: €{(o.total + iva).toFixed(2)}
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-700 mt-1">Totale: €{o.total.toFixed(2)}</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -3703,7 +3758,7 @@ function ClienteDashboard({ data, client, actions }) {
         lastOrder={lastOrder}
         onBack={() => setSubScreen("dashboard")}
         onCreate={({ returns, ...payload }) => {
-          actions.addOrder({ clientId: client.id, ...payload });
+          actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });
           (returns || []).forEach((r) => {
             actions.createReturn({ clientId: client.id, ...r });
           });
@@ -3727,7 +3782,6 @@ function ClienteDashboard({ data, client, actions }) {
     return (
       <SaldareScreen
         orders={daSaldare}
-        onDeclarePaid={actions.declarePaid}
         onBack={() => setSubScreen("dashboard")}
       />
     );
@@ -3892,6 +3946,11 @@ export default function App() {
       await refresh();
       return res;
     },
+    setClientPaymentMethod: async (clientId, method) => {
+      const res = await api.setClientPaymentMethod(clientId, method);
+      await refresh();
+      return res;
+    },
     createReturn: async (fields) => {
       const res = await api.createReturn(fields);
       await refresh();
@@ -3948,23 +4007,8 @@ export default function App() {
       await api.setOrderNote(orderId, note);
       await refresh();
     },
-    toggleInvoiced: async (orderId, value) => {
-      const res = await api.toggleInvoiced(orderId, value);
-      await refresh();
-      return res;
-    },
-    declarePaid: async (orderId) => {
-      const res = await api.declarePaid(orderId);
-      await refresh();
-      return res;
-    },
     confirmPayment: async (orderId) => {
       const res = await api.confirmPayment(orderId);
-      await refresh();
-      return res;
-    },
-    rejectPayment: async (orderId) => {
-      const res = await api.rejectPayment(orderId);
       await refresh();
       return res;
     },

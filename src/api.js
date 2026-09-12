@@ -681,11 +681,19 @@ export async function setOrderNote(orderId, note) {
 export async function confirmPayment(orderId) {
   try {
     const clientId = await getOrderClientId(orderId);
-    const { error } = await neon
+    const { data, error } = await neon
       .from("orders")
       .update({ payment_status: "saldato" })
-      .eq("id", orderId);
+      .eq("id", orderId)
+      .select();
     if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error:
+          "L'aggiornamento non ha avuto effetto (probabile problema di permessi sul database). Nessuna riga modificata.",
+      };
+    }
     if (clientId) {
       await addNotification(clientId, `Il tuo ordine #${orderId} risulta saldato. Grazie!`);
     }

@@ -943,6 +943,7 @@ function OrderDetailAdminScreen({
   const [addingItem, setAddingItem] = useState(false);
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [selectedCredits, setSelectedCredits] = useState([]);
+  const [paymentError, setPaymentError] = useState("");
   const [applyingCredit, setApplyingCredit] = useState(false);
   const urgent = isUrgentOrder(order);
   const isConsegnato = order.status === "consegnato";
@@ -1220,8 +1221,15 @@ function OrderDetailAdminScreen({
           ) : (
             <>
               <div className="text-sm text-gray-500 mb-2">Ancora da saldare.</div>
+              {paymentError && (
+                <div className="text-xs text-rose-600 mb-2">{paymentError}</div>
+              )}
               <button
-                onClick={() => onConfirmPayment(order.id)}
+                onClick={async () => {
+                  setPaymentError("");
+                  const res = await onConfirmPayment(order.id);
+                  if (res && res.ok === false) setPaymentError(res.error);
+                }}
                 className="w-full border border-gray-300 rounded-lg py-2 text-sm font-semibold text-gray-800"
               >
                 Segna come saldato
@@ -1834,6 +1842,8 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
   const daSaldare = sorted.filter((o) => o.paymentStatus !== "saldato");
   const totaleDaSaldare = daSaldare.reduce((s, o) => s + o.total, 0);
   const [confirmingId, setConfirmingId] = useState(null);
+  const [errorId, setErrorId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   return (
     <div className="px-6 pt-5 pb-8">
@@ -1868,8 +1878,13 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500">Confermi?</span>
                   <button
-                    onClick={() => {
-                      onConfirmPayment(o.id);
+                    onClick={async () => {
+                      setErrorId(null);
+                      const res = await onConfirmPayment(o.id);
+                      if (res && res.ok === false) {
+                        setErrorId(o.id);
+                        setErrorMsg(res.error);
+                      }
                       setConfirmingId(null);
                     }}
                     className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
@@ -1894,6 +1909,7 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
                 </button>
               )}
             </div>
+            {errorId === o.id && <div className="text-xs text-rose-600 mt-2">{errorMsg}</div>}
           </div>
         );
       })}
@@ -1907,6 +1923,8 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
     .filter((o) => o.status === "consegnato" && o.paymentMethod === method && o.paymentStatus !== "saldato")
     .sort((a, b) => b.id - a.id);
   const [confirmingId, setConfirmingId] = useState(null);
+  const [errorId, setErrorId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
   const isCarta = method === "carta";
   const totale = list.reduce((s, o) => s + o.total * (isCarta ? 1.22 : 1), 0);
 
@@ -1947,8 +1965,13 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500">Confermi?</span>
                   <button
-                    onClick={() => {
-                      onConfirmPayment(o.id);
+                    onClick={async () => {
+                      setErrorId(null);
+                      const res = await onConfirmPayment(o.id);
+                      if (res && res.ok === false) {
+                        setErrorId(o.id);
+                        setErrorMsg(res.error);
+                      }
                       setConfirmingId(null);
                     }}
                     className="bg-gray-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1.5"
@@ -1971,6 +1994,9 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
                 </button>
               )}
             </div>
+            {errorId === o.id && (
+              <div className="text-xs text-rose-600 mt-2">{errorMsg}</div>
+            )}
           </div>
         );
       })}

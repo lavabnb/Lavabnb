@@ -326,49 +326,6 @@ export async function addNotification(clientId, message, audience = "client") {
 
 // ---------------- Ordini ----------------
 
-async function applyPendingCredit(clientId, orderId, currentTotal) {
-  const { data: pending } = await neon
-    .from("returns")
-    .select("id, amount, order_id, item_name, reason, note, created_at")
-    .eq("client_id", clientId)
-    .eq("applied", false)
-    .order("created_at");
-  const rows = pending || [];
-  if (rows.length === 0) return currentTotal;
-  let remaining = currentTotal;
-  for (const r of rows) {
-    if (remaining <= 0) break;
-    const rowAmount = Number(r.amount);
-    if (rowAmount <= remaining) {
-      // Questo credito serve tutto: lo segno come usato per intero.
-      await neon.from("returns").update({ applied: true, applied_order_id: orderId }).eq("id", r.id);
-      remaining -= rowAmount;
-    } else {
-      // Serve solo una parte: divido la riga in "usato ora" + "residuo ancora disponibile".
-      await neon
-        .from("returns")
-        .update({ amount: remaining, applied: true, applied_order_id: orderId })
-        .eq("id", r.id);
-      await neon.from("returns").insert([
-        {
-          client_id: clientId,
-          order_id: r.order_id,
-          item_name: r.item_name,
-          qty: 1,
-          amount: rowAmount - remaining,
-          reason: r.reason,
-          note: r.note,
-          applied: false,
-          created_at: r.created_at,
-        },
-      ]);
-      remaining = 0;
-    }
-  }
-  const newTotal = Math.max(0, remaining);
-  await neon.from("orders").update({ total: newTotal }).eq("id", orderId);
-  return newTotal;
-}
 
 export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod }) {
   const { data, error } = await neon
@@ -416,9 +373,13 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
       console.error("createOrder note->message error:", msgError);
     } else {
       await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
+      await addNotification(
+        clientId,
+        `Nuovo messaggio dal cliente sull'ordine #${orderId}: "${note.trim()}"`,
+        "staff"
+      );
     }
   }
-  let runningTotal = total;
   if (returns && returns.length > 0) {
     const { error: returnsError } = await neon.from("returns").insert(
       returns.map((r) => ({
@@ -429,21 +390,12 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
         amount: r.amount,
         reason: r.reason,
         note: r.note || "",
-        applied: true,
-        applied_order_id: orderId,
+        applied: false,
         staff_seen: false,
       }))
     );
     if (returnsError) await fail("salvataggio resi segnalati", returnsError);
-    const creditTotal = returns.reduce((s, r) => s + r.amount, 0);
-    if (creditTotal > 0) {
-      runningTotal = Math.max(0, runningTotal - creditTotal);
-      await neon.from("orders").update({ total: runningTotal }).eq("id", orderId);
-    }
   }
-  // Applica anche eventuale credito già disponibile da resi/aggiunte precedenti,
-  // senza mai riapplicare crediti già usati altrove (query fatta a insert avvenuto).
-  await applyPendingCredit(clientId, orderId, runningTotal);
   await addNotification(clientId, `Il tuo ordine #${orderId} è stato ricevuto.`);
   return orderId;
 }
@@ -467,6 +419,14 @@ export async function sendOrderMessage(orderId, sender, message) {
       }
     } else {
       await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
+      const clientId = await getOrderClientId(orderId);
+      if (clientId) {
+        await addNotification(
+          clientId,
+          `Nuovo messaggio dal cliente sull'ordine #${orderId}: "${message}"`,
+          "staff"
+        );
+      }
     }
     return { ok: true };
   } catch (e) {
@@ -528,7 +488,6 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
       throw new Error("Errore durante il salvataggio dei capi: " + itemsError.message);
     }
   }
-  await applyPendingCredit(clientId, orderId, total);
   await addNotification(clientId, `La lavanderia ha registrato un nuovo ordine per te (#${orderId}).`);
   if (deliveryDate) {
     await addNotification(

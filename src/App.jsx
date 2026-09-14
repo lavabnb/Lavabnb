@@ -1599,6 +1599,8 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
   const [scheduleNow, setScheduleNow] = useState(false);
   const [date, setDate] = useState(addDaysISO(isoToday(), 1));
   const [time, setTime] = useState("10:00");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const client = clients.find((c) => c.id === clientId);
   const categories = client
@@ -1732,9 +1734,16 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
           <span>{itemCount} capi selezionati</span>
           <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
         </div>
+        {submitError && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-2">
+            {submitError}
+          </div>
+        )}
         <button
-          disabled={itemCount === 0 || !clientId}
-          onClick={() => {
+          disabled={itemCount === 0 || !clientId || submitting}
+          onClick={async () => {
+            setSubmitError("");
+            setSubmitting(true);
             const orderItems = allEnabled
               .filter((it) => (qty[it.id] || 0) > 0)
               .map((it) => ({
@@ -1743,7 +1752,7 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
                 qty: qty[it.id],
                 price: client.pricing[it.id],
               }));
-            onCreate({
+            const res = await onCreate({
               clientId,
               items: orderItems,
               total,
@@ -1751,10 +1760,14 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
               deliveryTime: scheduleNow ? time : null,
               paymentMethod: client.paymentMethod,
             });
+            setSubmitting(false);
+            if (res && res.ok === false) {
+              setSubmitError(res.error || "Non è stato possibile creare l'ordine. Riprova.");
+            }
           }}
           className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3.5 font-bold"
         >
-          Crea Ordine
+          {submitting ? "Creazione in corso..." : "Crea Ordine"}
         </button>
       </div>
     </div>
@@ -2413,9 +2426,10 @@ function LavanderiaView({ data, actions }) {
             clients={data.clients}
             catalog={data.catalog}
             onBack={() => setCreatingOrder(false)}
-            onCreate={(payload) => {
-              actions.adminCreateOrder(payload);
-              setCreatingOrder(false);
+            onCreate={async (payload) => {
+              const res = await actions.adminCreateOrder(payload);
+              if (res.ok) setCreatingOrder(false);
+              return res;
             }}
           />
         </div>
@@ -2591,6 +2605,8 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
   const [returnQtys, setReturnQtys] = useState({});
   const [returnReason, setReturnReason] = useState("cliente");
   const [returnNote, setReturnNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   if (categories.length === 0) {
     return (
@@ -2904,9 +2920,16 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
               </div>
             );
           })()}
+        {submitError && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-2">
+            {submitError}
+          </div>
+        )}
         <button
-          disabled={itemCount === 0 || hasInvalidSlot || validSlots.length === 0}
-          onClick={() => {
+          disabled={itemCount === 0 || hasInvalidSlot || validSlots.length === 0 || submitting}
+          onClick={async () => {
+            setSubmitError("");
+            setSubmitting(true);
             const orderItems = allEnabled
               .filter((it) => (qty[it.id] || 0) > 0)
               .map((it) => ({
@@ -2915,7 +2938,7 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
                 qty: qty[it.id],
                 price: client.pricing[it.id],
               }));
-            onCreate({
+            const res = await onCreate({
               items: orderItems,
               total,
               preferredSlots: validSlots,
@@ -2929,10 +2952,14 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
                 note: returnNote.trim(),
               })),
             });
+            setSubmitting(false);
+            if (res && res.ok === false) {
+              setSubmitError(res.error || "Non è stato possibile creare l'ordine. Riprova.");
+            }
           }}
           className="w-full bg-gray-900 disabled:bg-gray-300 text-white rounded-xl py-3.5 font-bold"
         >
-          Conferma Ordine
+          {submitting ? "Creazione in corso..." : "Conferma Ordine"}
         </button>
       </div>
     </div>
@@ -4124,9 +4151,10 @@ function ClienteDashboard({ data, client, actions }) {
         lastOrder={lastOrder}
         availableCredits={availableCredits}
         onBack={() => setSubScreen("dashboard")}
-        onCreate={(payload) => {
-          actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });
-          setSubScreen("dashboard");
+        onCreate={async (payload) => {
+          const res = await actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });
+          if (res.ok) setSubScreen("dashboard");
+          return res;
         }}
       />
     );
@@ -4331,12 +4359,24 @@ export default function App() {
       return res;
     },
     addOrder: async (payload) => {
-      await api.createOrder(payload);
-      await refresh();
+      try {
+        await api.createOrder(payload);
+        await refresh();
+        return { ok: true };
+      } catch (e) {
+        console.error("addOrder error:", e);
+        return { ok: false, error: e.message || String(e) };
+      }
     },
     adminCreateOrder: async (payload) => {
-      await api.adminCreateOrder(payload);
-      await refresh();
+      try {
+        await api.adminCreateOrder(payload);
+        await refresh();
+        return { ok: true };
+      } catch (e) {
+        console.error("adminCreateOrder error:", e);
+        return { ok: false, error: e.message || String(e) };
+      }
     },
     scheduleOrder: async (orderId, date, time) => {
       await api.scheduleOrder(orderId, date, time);

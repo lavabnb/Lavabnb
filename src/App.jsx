@@ -105,9 +105,7 @@ function isDeliverySoon(order) {
 function hasClientMessage(order) {
   const messages = order.messages || [];
   const last = messages[messages.length - 1];
-  if (!last || last.sender !== "client") return false;
-  if (!order.staffLastReadAt) return true;
-  return new Date(last.createdAt).getTime() > new Date(order.staffLastReadAt).getTime();
+  return !!last && last.sender === "client" && order.staffMessageSeen === false;
 }
 
 // ---------- Catalogo & clienti (seed) ----------
@@ -1017,6 +1015,8 @@ function OrderDetailAdminScreen({
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [draftItems, setDraftItems] = useState(() => order.items.map((it) => ({ ...it })));
   const [dirty, setDirty] = useState(false);
   const [savingItems, setSavingItems] = useState(false);
@@ -1391,12 +1391,22 @@ function OrderDetailAdminScreen({
           <div className="text-sm text-rose-600 font-semibold mb-2">
             Sei sicuro? L'operazione non è reversibile.
           </div>
+          {deleteError && (
+            <div className="text-xs text-rose-600 mb-2">{deleteError}</div>
+          )}
           <div className="flex gap-2">
             <button
-              onClick={() => onDelete(order.id)}
-              className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-sm font-semibold"
+              disabled={deleting}
+              onClick={async () => {
+                setDeleteError("");
+                setDeleting(true);
+                const res = await onDelete(order.id);
+                setDeleting(false);
+                if (res && res.ok === false) setDeleteError(res.error);
+              }}
+              className="flex-1 bg-rose-600 disabled:bg-rose-300 text-white rounded-lg py-1.5 text-sm font-semibold"
             >
-              Sì, elimina
+              {deleting ? "Eliminazione..." : "Sì, elimina"}
             </button>
             <button
               onClick={() => setConfirmingDelete(false)}
@@ -2661,9 +2671,10 @@ function LavanderiaView({ data, actions }) {
               actions.unscheduleOrder(id);
               setDetailOrderId(null);
             }}
-            onDelete={(id) => {
-              actions.deleteOrder(id);
-              setDetailOrderId(null);
+            onDelete={async (id) => {
+              const res = await actions.deleteOrder(id);
+              if (res && res.ok) setDetailOrderId(null);
+              return res;
             }}
             onSendMessage={actions.sendOrderMessage}
             onCreateReturn={actions.createReturn}
@@ -4540,8 +4551,9 @@ export default function App() {
       await refresh();
     },
     deleteOrder: async (orderId) => {
-      await api.deleteOrder(orderId);
+      const res = await api.deleteOrder(orderId);
       await refresh();
+      return res;
     },
     updateOrderItemQty: async (orderId, itemId, newQty) => {
       await api.updateOrderItemQty(orderId, itemId, newQty);

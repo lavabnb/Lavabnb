@@ -184,6 +184,7 @@ export async function fetchAll() {
     invoiced: !!o.invoiced,
     staffMessageSeen: o.staff_message_seen !== false,
     paymentMethod: o.payment_method || "contanti",
+    createdBy: o.created_by || "client",
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -328,30 +329,58 @@ export async function addNotification(clientId, message, audience = "client") {
 async function applyPendingCredit(clientId, orderId, currentTotal) {
   const { data: pending } = await neon
     .from("returns")
-    .select("id, amount")
+    .select("id, amount, order_id, item_name, reason, note, created_at")
     .eq("client_id", clientId)
     .eq("applied", false)
     .order("created_at");
   const rows = pending || [];
   if (rows.length === 0) return currentTotal;
   let remaining = currentTotal;
-  const usedIds = [];
   for (const r of rows) {
     if (remaining <= 0) break;
-    usedIds.push(r.id);
-    remaining = Math.max(0, remaining - Number(r.amount));
+    const rowAmount = Number(r.amount);
+    if (rowAmount <= remaining) {
+      // Questo credito serve tutto: lo segno come usato per intero.
+      await neon.from("returns").update({ applied: true, applied_order_id: orderId }).eq("id", r.id);
+      remaining -= rowAmount;
+    } else {
+      // Serve solo una parte: divido la riga in "usato ora" + "residuo ancora disponibile".
+      await neon
+        .from("returns")
+        .update({ amount: remaining, applied: true, applied_order_id: orderId })
+        .eq("id", r.id);
+      await neon.from("returns").insert([
+        {
+          client_id: clientId,
+          order_id: r.order_id,
+          item_name: r.item_name,
+          qty: 1,
+          amount: rowAmount - remaining,
+          reason: r.reason,
+          note: r.note,
+          applied: false,
+          created_at: r.created_at,
+        },
+      ]);
+      remaining = 0;
+    }
   }
-  if (usedIds.length > 0) {
-    await neon.from("returns").update({ applied: true, applied_order_id: orderId }).in("id", usedIds);
-    await neon.from("orders").update({ total: remaining }).eq("id", orderId);
-  }
-  return remaining;
+  const newTotal = Math.max(0, remaining);
+  await neon.from("orders").update({ total: newTotal }).eq("id", orderId);
+  return newTotal;
 }
 
 export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod }) {
   const { data, error } = await neon
     .from("orders")
-    .insert([{ client_id: clientId, total, status: "nuovo", note: note || "", payment_method: paymentMethod || "contanti" }])
+    .insert([{
+      client_id: clientId,
+      total,
+      status: "nuovo",
+      note: note || "",
+      payment_method: paymentMethod || "contanti",
+      created_by: "client",
+    }])
     .select();
   if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione ordine");
   const orderId = data[0].id;
@@ -364,6 +393,10 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
     await neon
       .from("order_slots")
       .insert(preferredSlots.map((s) => ({ order_id: orderId, slot_date: s.date, slot_time: s.time })));
+  }
+  if (note && note.trim()) {
+    await neon.from("order_messages").insert([{ order_id: orderId, sender: "client", message: note.trim() }]);
+    await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
   }
   let runningTotal = total;
   if (returns && returns.length > 0) {
@@ -455,6 +488,7 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
         delivery_date: deliveryDate || null,
         delivery_time: deliveryTime || null,
         payment_method: paymentMethod || "contanti",
+        created_by: "lavanderia",
       },
     ])
     .select();

@@ -2140,7 +2140,114 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
   );
 }
 
-function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment }) {
+function ResiScreen({ returns, clients, orders, onBack, onOpenDetail, onApplyCredit }) {
+  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const sorted = [...returns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const [applyingId, setApplyingId] = useState(null);
+  const [targetOrderId, setTargetOrderId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errorId, setErrorId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  return (
+    <div className="px-6 pt-5 pb-8">
+      <ScreenHeader title="Resi" subtitle="Tutti i resi richiesti dai clienti" onBack={onBack} />
+      {sorted.length === 0 && (
+        <p className="text-gray-400 text-sm py-8 text-center">Nessun reso registrato ancora.</p>
+      )}
+      {sorted.map((r) => {
+        const clientOrders = orders
+          .filter((o) => o.clientId === r.clientId)
+          .sort((a, b) => b.id - a.id);
+        return (
+          <div key={r.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="font-bold text-gray-900 text-sm">{clientName(r.clientId)}</div>
+            <div className="text-xs text-gray-400 mb-1">
+              {r.orderId ? (
+                <button onClick={() => onOpenDetail(r.orderId)} className="underline">
+                  Ordine di origine #{r.orderId}
+                </button>
+              ) : (
+                "Credito aggiunto manualmente"
+              )}
+              {" • "}
+              {formatIT(r.createdAt.slice(0, 10))}
+            </div>
+            <div className="text-sm text-gray-700">
+              {r.qty}× {r.itemName} — €{r.amount.toFixed(2)} ({REASON_LABELS[r.reason] || r.reason})
+            </div>
+            {r.note && <div className="text-xs text-gray-400 mt-1">{r.note}</div>}
+
+            {r.applied ? (
+              <div className="mt-2 text-xs font-semibold text-emerald-600">
+                ✔ Applicato all'ordine #{r.appliedOrderId}
+              </div>
+            ) : applyingId === r.id ? (
+              <div className="mt-3 bg-gray-50 rounded-xl p-3">
+                <div className="text-xs font-semibold text-gray-500 mb-1.5">Scegli l'ordine a cui applicarlo</div>
+                <select
+                  value={targetOrderId}
+                  onChange={(e) => setTargetOrderId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+                >
+                  <option value="">Seleziona un ordine...</option>
+                  {clientOrders.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      #{o.id} — {formatIT(o.deliveryDate || o.createdDate)} — €{o.total.toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+                {errorId === r.id && <div className="text-xs text-rose-600 mb-2">{errorMsg}</div>}
+                <div className="flex gap-2">
+                  <button
+                    disabled={!targetOrderId || busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setErrorId(null);
+                      const res = await onApplyCredit([r.id], parseInt(targetOrderId, 10));
+                      setBusy(false);
+                      if (res && res.ok === false) {
+                        setErrorId(r.id);
+                        setErrorMsg(res.error);
+                      } else {
+                        setApplyingId(null);
+                        setTargetOrderId("");
+                      }
+                    }}
+                    className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-1.5 text-sm font-semibold"
+                  >
+                    Applica
+                  </button>
+                  <button
+                    onClick={() => {
+                      setApplyingId(null);
+                      setTargetOrderId("");
+                    }}
+                    className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-xs font-semibold text-amber-600">Da applicare</span>
+                <button
+                  onClick={() => setApplyingId(r.id)}
+                  className="border border-gray-300 rounded-lg px-3 py-1 text-xs font-semibold text-gray-800"
+                >
+                  Applica a un ordine
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment, onApplyCredit }) {
   const weightOf = (itemId) => catalog.find((c) => c.id === itemId)?.weightKg || 0;
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const consegnati = orders.filter((o) => o.status === "consegnato");
@@ -2196,6 +2303,8 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
   const [viewingClientId, setViewingClientId] = useState(null);
   const [viewingFatturare, setViewingFatturare] = useState(false);
   const [viewingSaldare, setViewingSaldare] = useState(false);
+  const [viewingResi, setViewingResi] = useState(false);
+  const resiDaApplicare = (returns || []).filter((r) => !r.applied).length;
   const daSaldareContantiGlobale = orders.filter(
     (o) => o.status === "consegnato" && o.paymentMethod === "contanti" && o.paymentStatus !== "saldato"
   );
@@ -2243,6 +2352,19 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
     );
   }
 
+  if (viewingResi) {
+    return (
+      <ResiScreen
+        returns={returns || []}
+        clients={clients}
+        orders={orders}
+        onBack={() => setViewingResi(false)}
+        onOpenDetail={onOpenDetail}
+        onApplyCredit={onApplyCredit}
+      />
+    );
+  }
+
   if (viewingClientId) {
     return (
       <ClientInvoiceScreen
@@ -2260,7 +2382,7 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
     <div className="px-6 pt-5 pb-8">
       <ScreenHeader title="Statistiche" subtitle="Calcolate sulle consegne archiviate" />
 
-      <div className="grid grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-2 gap-3 mb-3">
         <button
           onClick={() => setViewingSaldare(true)}
           className="border border-amber-200 bg-amber-50 rounded-2xl p-4 text-left"
@@ -2276,6 +2398,17 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
           <div className="text-2xl font-bold mt-1 text-amber-700">{daFatturareCartaGlobale.length}</div>
         </button>
       </div>
+
+      <button
+        onClick={() => setViewingResi(true)}
+        className="w-full border border-rose-200 bg-rose-50 rounded-2xl p-4 mb-5 text-left flex items-center justify-between"
+      >
+        <div>
+          <div className="text-xs text-rose-700">Resi da applicare</div>
+          <div className="text-2xl font-bold mt-1 text-rose-700">{resiDaApplicare}</div>
+        </div>
+        <ChevronDown size={18} className="text-rose-600 -rotate-90" />
+      </button>
 
       <div className="border border-gray-200 rounded-2xl p-4 mb-5">
         <div className="font-bold text-gray-900 mb-2 text-sm">Cerca un ordine</div>
@@ -2573,6 +2706,7 @@ function LavanderiaView({ data, actions }) {
         returns={data.returns}
         onOpenDetail={setDetailOrderId}
         onConfirmPayment={actions.confirmPayment}
+        onApplyCredit={actions.applyReturnsToOrder}
       />
     );
   }
@@ -2593,7 +2727,7 @@ function LavanderiaView({ data, actions }) {
 }
 
 // ================= NUOVO ORDINE (lato Cliente) =================
-function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, onCreate }) {
+function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
   const categories = CATEGORY_ORDER.filter((cat) =>
     catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
   );
@@ -2849,29 +2983,6 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
           </div>
         )}
 
-        {availableCredits && availableCredits.length > 0 && (
-          <div className="mb-4 border border-emerald-200 bg-emerald-50 rounded-2xl p-4">
-            <div className="font-bold text-emerald-800 mb-1">💳 Crediti disponibili</div>
-            <p className="text-xs text-emerald-700 mb-2">
-              Verranno scalati automaticamente dal totale di questo ordine.
-            </p>
-            <div className="divide-y divide-emerald-100">
-              {availableCredits.map((c) => (
-                <div key={c.id} className="flex items-center justify-between py-1.5 text-sm text-emerald-800">
-                  <span>
-                    {c.itemName} — {formatIT(c.createdAt.slice(0, 10))} ({REASON_LABELS[c.reason] || c.reason})
-                  </span>
-                  <span className="font-semibold">€{c.amount.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between mt-2 pt-2 border-t border-emerald-200 text-sm font-bold text-emerald-800">
-              <span>Totale credito disponibile</span>
-              <span>€{availableCredits.reduce((s, c) => s + c.amount, 0).toFixed(2)}</span>
-            </div>
-          </div>
-        )}
-
         <div className="mb-4">
           <div className="font-bold text-gray-900 mb-1">Note (facoltativo)</div>
           <p className="text-xs text-gray-400 mb-2">
@@ -2892,34 +3003,11 @@ function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, 
           <span>{itemCount} capi selezionati</span>
           <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
         </div>
-        {availableCredits && availableCredits.length > 0 && (
-          <div className="flex items-center justify-between mb-1 text-sm text-emerald-700">
-            <span>Credito applicato</span>
-            <span className="font-semibold">
-              -€{Math.min(total, availableCredits.reduce((s, c) => s + c.amount, 0)).toFixed(2)}
-            </span>
+        {client.paymentMethod === "carta" && (
+          <div className="text-xs text-gray-400 text-right mb-2">
+            IVA 22%: €{(total * 0.22).toFixed(2)} — Totale con IVA: €{(total * 1.22).toFixed(2)}
           </div>
         )}
-        {availableCredits && availableCredits.length > 0 && (
-          <div className="flex items-center justify-between mb-1 text-sm font-bold text-gray-900">
-            <span>Totale dopo credito</span>
-            <span>
-              €{Math.max(0, total - availableCredits.reduce((s, c) => s + c.amount, 0)).toFixed(2)}
-            </span>
-          </div>
-        )}
-        {client.paymentMethod === "carta" &&
-          (() => {
-            const afterCredit = availableCredits
-              ? Math.max(0, total - availableCredits.reduce((s, c) => s + c.amount, 0))
-              : total;
-            return (
-              <div className="text-xs text-gray-400 text-right mb-2">
-                IVA 22%: €{(afterCredit * 0.22).toFixed(2)} — Totale con IVA: €
-                {(afterCredit * 1.22).toFixed(2)}
-              </div>
-            );
-          })()}
         {submitError && (
           <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-2">
             {submitError}
@@ -4141,15 +4229,11 @@ function ClienteDashboard({ data, client, actions }) {
 
   if (subScreen === "newOrder") {
     const lastOrder = myOrders.filter((o) => o.status === "consegnato").sort((a, b) => b.id - a.id)[0] || null;
-    const availableCredits = (data.returns || [])
-      .filter((r) => r.clientId === client.id && !r.applied)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return (
       <NewOrderScreen
         client={client}
         catalog={data.catalog}
         lastOrder={lastOrder}
-        availableCredits={availableCredits}
         onBack={() => setSubScreen("dashboard")}
         onCreate={async (payload) => {
           const res = await actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });

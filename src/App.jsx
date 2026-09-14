@@ -105,7 +105,9 @@ function isDeliverySoon(order) {
 function hasClientMessage(order) {
   const messages = order.messages || [];
   const last = messages[messages.length - 1];
-  return !!last && last.sender === "client" && order.staffMessageSeen === false;
+  if (!last || last.sender !== "client") return false;
+  if (!order.staffLastReadAt) return true;
+  return new Date(last.createdAt).getTime() > new Date(order.staffLastReadAt).getTime();
 }
 
 // ---------- Catalogo & clienti (seed) ----------
@@ -265,6 +267,7 @@ function ClientDetailScreen({
   const [addingCredit, setAddingCredit] = useState(false);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditNote, setCreditNote] = useState("");
+  const [creditAdded, setCreditAdded] = useState(false);
 
   const submitCredit = async () => {
     const amount = toNumber(creditAmount);
@@ -273,6 +276,7 @@ function ClientDetailScreen({
     setCreditAmount("");
     setCreditNote("");
     setAddingCredit(false);
+    setCreditAdded(true);
   };
 
   const submitNewItem = (category) => {
@@ -346,9 +350,17 @@ function ClientDetailScreen({
 
       <div className="border border-gray-200 rounded-2xl p-4 mb-6">
         <div className="text-sm font-bold text-gray-900 mb-2">Credito cliente</div>
+        {creditAdded && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">
+            ✔ Reso aggiunto alla lista dei resi da applicare
+          </div>
+        )}
         {!addingCredit ? (
           <button
-            onClick={() => setAddingCredit(true)}
+            onClick={() => {
+              setAddingCredit(true);
+              setCreditAdded(false);
+            }}
             className="w-full border border-dashed border-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-semibold"
           >
             + Aggiungi credito manuale
@@ -1591,7 +1603,7 @@ function DashboardScreen({
   );
 }
 
-function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
+function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
   const eligibleClients = clients.filter((c) => Object.keys(c.pricing).length > 0);
   const [clientId, setClientId] = useState(eligibleClients[0]?.id || "");
   const [category, setCategory] = useState("");
@@ -1599,10 +1611,15 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
   const [scheduleNow, setScheduleNow] = useState(false);
   const [date, setDate] = useState(addDaysISO(isoToday(), 1));
   const [time, setTime] = useState("10:00");
+  const [selectedReturnIds, setSelectedReturnIds] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
   const client = clients.find((c) => c.id === clientId);
+  const availableReturns = (returns || []).filter((r) => r.clientId === clientId && !r.applied);
+  const selectedReturnsTotal = availableReturns
+    .filter((r) => selectedReturnIds.includes(r.id))
+    .reduce((s, r) => s + r.amount, 0);
   const categories = client
     ? CATEGORY_ORDER.filter((cat) =>
         catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
@@ -1614,6 +1631,7 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
       setCategory(categories[0]);
     }
     setQty({});
+    setSelectedReturnIds([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
@@ -1729,11 +1747,52 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
         )}
       </div>
 
+      {availableReturns.length > 0 && (
+        <div className="px-6 pb-4">
+          <div className="border border-emerald-200 bg-emerald-50 rounded-2xl p-4">
+            <div className="font-bold text-emerald-800 mb-2">Resi disponibili per questo cliente</div>
+            {availableReturns.map((r) => (
+              <label key={r.id} className="flex items-center gap-2 py-1.5 text-sm text-emerald-800">
+                <input
+                  type="checkbox"
+                  checked={selectedReturnIds.includes(r.id)}
+                  onChange={(e) =>
+                    setSelectedReturnIds((ids) =>
+                      e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id)
+                    )
+                  }
+                  className="w-4 h-4"
+                />
+                {r.qty}× {r.itemName} — €{r.amount.toFixed(2)} ({REASON_LABELS[r.reason] || r.reason})
+              </label>
+            ))}
+            {selectedReturnIds.length > 0 && (
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-emerald-200 text-sm font-bold text-emerald-800">
+                <span>Credito selezionato</span>
+                <span>€{selectedReturnsTotal.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="px-6 pb-6 pt-2 border-t border-gray-100">
-        <div className="flex items-center justify-between mb-3 text-sm text-gray-600">
+        <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
           <span>{itemCount} capi selezionati</span>
           <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
         </div>
+        {selectedReturnIds.length > 0 && (
+          <>
+            <div className="flex items-center justify-between mb-1 text-sm text-emerald-700">
+              <span>Credito applicato</span>
+              <span className="font-semibold">-€{Math.min(total, selectedReturnsTotal).toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between mb-3 text-sm font-bold text-gray-900">
+              <span>Totale finale</span>
+              <span>€{Math.max(0, total - selectedReturnsTotal).toFixed(2)}</span>
+            </div>
+          </>
+        )}
         {submitError && (
           <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-2">
             {submitError}
@@ -1759,6 +1818,7 @@ function AdminNewOrderScreen({ clients, catalog, onBack, onCreate }) {
               deliveryDate: scheduleNow ? date : null,
               deliveryTime: scheduleNow ? time : null,
               paymentMethod: client.paymentMethod,
+              returnIds: selectedReturnIds,
             });
             setSubmitting(false);
             if (res && res.ok === false) {
@@ -2558,6 +2618,7 @@ function LavanderiaView({ data, actions }) {
           <AdminNewOrderScreen
             clients={data.clients}
             catalog={data.catalog}
+            returns={data.returns}
             onBack={() => setCreatingOrder(false)}
             onCreate={async (payload) => {
               const res = await actions.adminCreateOrder(payload);

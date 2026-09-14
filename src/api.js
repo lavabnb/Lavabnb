@@ -183,7 +183,6 @@ export async function fetchAll() {
     lastModification: o.last_modification || "",
     invoiced: !!o.invoiced,
     staffMessageSeen: o.staff_message_seen !== false,
-    staffLastReadAt: o.staff_last_read_at || null,
     paymentMethod: o.payment_method || "contanti",
     createdBy: o.created_by || "client",
     total: Number(o.total),
@@ -440,7 +439,7 @@ export async function markMessageSeen(orderId) {
   try {
     const { error } = await neon
       .from("orders")
-      .update({ staff_last_read_at: new Date().toISOString() })
+      .update({ staff_message_seen: true })
       .eq("id", orderId);
     if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
     return { ok: true };
@@ -559,15 +558,35 @@ export async function markDelivered(orderId) {
 }
 
 export async function deleteOrder(orderId) {
-  const clientId = await getOrderClientId(orderId);
-  if (clientId) {
-    await addNotification(clientId, `Il tuo ordine #${orderId} è stato annullato dalla lavanderia.`);
+  try {
+    const clientId = await getOrderClientId(orderId);
+
+    const { error: err1 } = await neon.from("returns").delete().eq("order_id", orderId);
+    if (err1) {
+      console.error("deleteOrder returns(order_id) error:", err1);
+      return { ok: false, error: "Non ho potuto eliminare i resi collegati: " + err1.message };
+    }
+    const { error: err2 } = await neon.from("returns").delete().eq("applied_order_id", orderId);
+    if (err2) {
+      console.error("deleteOrder returns(applied_order_id) error:", err2);
+      return { ok: false, error: "Non ho potuto eliminare i crediti collegati: " + err2.message };
+    }
+    const { error: err3, data } = await neon.from("orders").delete().eq("id", orderId).select();
+    if (err3) {
+      console.error("deleteOrder orders error:", err3);
+      return { ok: false, error: "Non ho potuto eliminare l'ordine: " + err3.message };
+    }
+    if (!data || data.length === 0) {
+      return { ok: false, error: "L'ordine non risulta eliminato (probabile problema di permessi)." };
+    }
+    if (clientId) {
+      await addNotification(clientId, `Il tuo ordine #${orderId} è stato annullato dalla lavanderia.`);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("deleteOrder error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
-  // Elimino ogni reso collegato a questo ordine, sia come origine sia come
-  // ordine a cui era stato applicato, per non lasciare riferimenti residui.
-  await neon.from("returns").delete().eq("order_id", orderId);
-  await neon.from("returns").delete().eq("applied_order_id", orderId);
-  await neon.from("orders").delete().eq("id", orderId);
 }
 
 export async function updateOrderItemQty(orderId, itemId, newQty) {

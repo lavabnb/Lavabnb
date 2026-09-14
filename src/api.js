@@ -183,6 +183,7 @@ export async function fetchAll() {
     lastModification: o.last_modification || "",
     invoiced: !!o.invoiced,
     staffMessageSeen: o.staff_message_seen !== false,
+    staffLastReadAt: o.staff_last_read_at || null,
     paymentMethod: o.payment_method || "contanti",
     createdBy: o.created_by || "client",
     total: Number(o.total),
@@ -437,7 +438,10 @@ export async function sendOrderMessage(orderId, sender, message) {
 
 export async function markMessageSeen(orderId) {
   try {
-    const { error } = await neon.from("orders").update({ staff_message_seen: true }).eq("id", orderId);
+    const { error } = await neon
+      .from("orders")
+      .update({ staff_last_read_at: new Date().toISOString() })
+      .eq("id", orderId);
     if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
     return { ok: true };
   } catch (e) {
@@ -457,7 +461,7 @@ export async function markReturnSeen(returnId) {
   }
 }
 
-export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod }) {
+export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds }) {
   const status = deliveryDate ? "programmato" : "nuovo";
   const { data, error } = await neon
     .from("orders")
@@ -487,6 +491,9 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
       await neon.from("orders").delete().eq("id", orderId);
       throw new Error("Errore durante il salvataggio dei capi: " + itemsError.message);
     }
+  }
+  if (returnIds && returnIds.length > 0) {
+    await applyReturnsToOrder(returnIds, orderId);
   }
   await addNotification(clientId, `La lavanderia ha registrato un nuovo ordine per te (#${orderId}).`);
   if (deliveryDate) {
@@ -556,6 +563,10 @@ export async function deleteOrder(orderId) {
   if (clientId) {
     await addNotification(clientId, `Il tuo ordine #${orderId} è stato annullato dalla lavanderia.`);
   }
+  // Elimino ogni reso collegato a questo ordine, sia come origine sia come
+  // ordine a cui era stato applicato, per non lasciare riferimenti residui.
+  await neon.from("returns").delete().eq("order_id", orderId);
+  await neon.from("returns").delete().eq("applied_order_id", orderId);
   await neon.from("orders").delete().eq("id", orderId);
 }
 

@@ -382,25 +382,45 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
       created_by: "client",
     }])
     .select();
-  if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione ordine");
+  if (error || !data || !data[0]) {
+    console.error("createOrder insert orders error:", error);
+    throw new Error(error?.message || "Errore nella creazione dell'ordine.");
+  }
   const orderId = data[0].id;
+
+  const fail = async (context, err) => {
+    console.error(`createOrder error (${context}):`, err);
+    // Ripulisco l'ordine appena creato per non lasciare dati a metà.
+    await neon.from("orders").delete().eq("id", orderId);
+    throw new Error(`Errore durante "${context}": ${err?.message || err}`);
+  };
+
   if (items.length > 0) {
-    await neon.from("order_items").insert(
+    const { error: itemsError } = await neon.from("order_items").insert(
       items.map((it) => ({ order_id: orderId, item_id: it.itemId, name: it.name, qty: it.qty, price: it.price }))
     );
+    if (itemsError) await fail("salvataggio capi ordinati", itemsError);
   }
   if (preferredSlots && preferredSlots.length > 0) {
-    await neon
+    const { error: slotsError } = await neon
       .from("order_slots")
       .insert(preferredSlots.map((s) => ({ order_id: orderId, slot_date: s.date, slot_time: s.time })));
+    if (slotsError) await fail("salvataggio orari richiesti", slotsError);
   }
   if (note && note.trim()) {
-    await neon.from("order_messages").insert([{ order_id: orderId, sender: "client", message: note.trim() }]);
-    await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
+    const { error: msgError } = await neon
+      .from("order_messages")
+      .insert([{ order_id: orderId, sender: "client", message: note.trim() }]);
+    if (msgError) {
+      // Non blocco l'intero ordine per una nota non salvata: la segnalo soltanto.
+      console.error("createOrder note->message error:", msgError);
+    } else {
+      await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
+    }
   }
   let runningTotal = total;
   if (returns && returns.length > 0) {
-    await neon.from("returns").insert(
+    const { error: returnsError } = await neon.from("returns").insert(
       returns.map((r) => ({
         client_id: clientId,
         order_id: r.orderId || null,
@@ -414,6 +434,7 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
         staff_seen: false,
       }))
     );
+    if (returnsError) await fail("salvataggio resi segnalati", returnsError);
     const creditTotal = returns.reduce((s, r) => s + r.amount, 0);
     if (creditTotal > 0) {
       runningTotal = Math.max(0, runningTotal - creditTotal);
@@ -492,12 +513,20 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
       },
     ])
     .select();
-  if (error || !data || !data[0]) throw new Error(error?.message || "Errore creazione ordine");
+  if (error || !data || !data[0]) {
+    console.error("adminCreateOrder insert orders error:", error);
+    throw new Error(error?.message || "Errore nella creazione dell'ordine.");
+  }
   const orderId = data[0].id;
   if (items.length > 0) {
-    await neon.from("order_items").insert(
+    const { error: itemsError } = await neon.from("order_items").insert(
       items.map((it) => ({ order_id: orderId, item_id: it.itemId, name: it.name, qty: it.qty, price: it.price }))
     );
+    if (itemsError) {
+      console.error("adminCreateOrder items error:", itemsError);
+      await neon.from("orders").delete().eq("id", orderId);
+      throw new Error("Errore durante il salvataggio dei capi: " + itemsError.message);
+    }
   }
   await applyPendingCredit(clientId, orderId, total);
   await addNotification(clientId, `La lavanderia ha registrato un nuovo ordine per te (#${orderId}).`);

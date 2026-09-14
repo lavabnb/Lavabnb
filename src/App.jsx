@@ -97,6 +97,10 @@ function dueMs(order) {
   }
   return earliestSlotMs(order);
 }
+function getClientName(clients, id) {
+  return clients.find((c) => c.id === id)?.name || "—";
+}
+
 function isDeliverySoon(order) {
   if (order.status !== "programmato" || !order.deliveryDate) return false;
   const dt = new Date(`${order.deliveryDate}T${order.deliveryTime}:00`).getTime();
@@ -105,7 +109,7 @@ function isDeliverySoon(order) {
 function hasClientMessage(order) {
   const messages = order.messages || [];
   const last = messages[messages.length - 1];
-  return !!last && last.sender === "client" && order.staffMessageSeen === false;
+  return !!last && last.sender === "client";
 }
 
 // ---------- Catalogo & clienti (seed) ----------
@@ -680,7 +684,7 @@ function ConfirmDeliverButton({ orderId, onConfirm, className }) {
   );
 }
 
-function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail, onMarkMessageSeen }) {
+function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
   const [scheduling, setScheduling] = useState(false);
   const urgent = isUrgentOrder(order);
   const deliverySoon = isDeliverySoon(order);
@@ -702,17 +706,8 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
               </span>
             )}
             {clientMsg && (
-              <span className="bg-blue-600 text-white text-[11px] font-bold pl-2 pr-1 py-1 rounded-full flex items-center gap-1">
+              <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-1 rounded-full flex items-center gap-1">
                 <MessageSquare size={11} /> NUOVO MESSAGGIO
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMarkMessageSeen(order.id);
-                  }}
-                  className="ml-0.5 hover:bg-blue-700 rounded-full p-0.5"
-                >
-                  <X size={11} />
-                </button>
               </span>
             )}
           </div>
@@ -1432,10 +1427,9 @@ function DashboardScreen({
   onOpenDetail,
   onNewOrder,
   onLogout,
-  onMarkMessageSeen,
   onMarkReturnSeen,
 }) {
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const clientName = (id) => getClientName(clients, id);
   const today = isoToday();
   const ordersToday = orders.filter((o) => o.createdDate === today);
   const incassoOggi = ordersToday.reduce((s, o) => s + o.total, 0);
@@ -1526,7 +1520,7 @@ function DashboardScreen({
             return (
               <div
                 key={o.id}
-                className="flex items-center justify-between gap-2 py-1.5 border-t border-blue-100 first:border-0"
+                className="py-1.5 border-t border-blue-100 first:border-0"
               >
                 <div className="text-sm text-blue-800 min-w-0">
                   <div className="font-semibold truncate">
@@ -1534,12 +1528,6 @@ function DashboardScreen({
                   </div>
                   {last && <div className="text-xs text-blue-600 truncate">{last.message}</div>}
                 </div>
-                <button
-                  onClick={() => onMarkMessageSeen(o.id)}
-                  className="text-xs font-semibold text-blue-700 border border-blue-300 rounded-full px-3 py-1 shrink-0"
-                >
-                  Segna come letto
-                </button>
               </div>
             );
           })}
@@ -1606,7 +1594,6 @@ function DashboardScreen({
           onSchedule={onSchedule}
           onMarkDelivered={onMarkDelivered}
           onOpenDetail={onOpenDetail}
-          onMarkMessageSeen={onMarkMessageSeen}
         />
       ))}
     </div>
@@ -1844,8 +1831,8 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
   );
 }
 
-function ArchivioScreen({ orders, clients, onBack, onOpenDetail, onMarkMessageSeen }) {
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
+  const clientName = (id) => getClientName(clients, id);
   const [query, setQuery] = useState("");
   const consegnati = orders
     .filter((o) => o.status === "consegnato")
@@ -1892,17 +1879,8 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail, onMarkMessageSe
                 </span>
               )}
               {hasClientMessage(o) && (
-                <span className="bg-blue-600 text-white text-[10px] font-bold pl-2 pr-1 py-0.5 rounded-full flex items-center gap-1">
+                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                   <MessageSquare size={10} /> MESSAGGIO
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMarkMessageSeen(o.id);
-                    }}
-                    className="ml-0.5 hover:bg-blue-700 rounded-full p-0.5"
-                  >
-                    <X size={10} />
-                  </button>
                 </span>
               )}
             </div>
@@ -1934,7 +1912,7 @@ function CalendarioScreen({ orders, clients, onMarkDelivered, onOpenDetail }) {
     return d;
   });
   const [selected, setSelected] = useState(isoToday());
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const clientName = (id) => getClientName(clients, id);
 
   const cells = buildMonthGrid(month);
   const deliveriesByDay = {};
@@ -2124,7 +2102,7 @@ function ClientInvoiceScreen({ clientId, clientName, orders, onBack, onOpenDetai
 }
 
 function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBack, onOpenDetail, onConfirmPayment }) {
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const clientName = (id) => getClientName(clients, id);
   const list = orders
     .filter((o) => o.status === "consegnato" && o.paymentMethod === method && o.paymentStatus !== "saldato")
     .sort((a, b) => b.id - a.id);
@@ -2211,7 +2189,7 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
 }
 
 function ResiScreen({ returns, clients, orders, onBack, onOpenDetail, onApplyCredit }) {
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const clientName = (id) => getClientName(clients, id);
   const sorted = [...returns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const [applyingId, setApplyingId] = useState(null);
   const [targetOrderId, setTargetOrderId] = useState("");
@@ -2319,7 +2297,7 @@ function ResiScreen({ returns, clients, orders, onBack, onOpenDetail, onApplyCre
 
 function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment, onApplyCredit }) {
   const weightOf = (itemId) => catalog.find((c) => c.id === itemId)?.weightKg || 0;
-  const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const clientName = (id) => getClientName(clients, id);
   const consegnati = orders.filter((o) => o.status === "consegnato");
 
   const totaleConsegne = consegnati.length;
@@ -2710,7 +2688,6 @@ function LavanderiaView({ data, actions }) {
         onOpenDetail={setDetailOrderId}
         onNewOrder={() => setCreatingOrder(true)}
         onLogout={actions.logout}
-        onMarkMessageSeen={actions.markMessageSeen}
         onMarkReturnSeen={actions.markReturnSeen}
       />
     );
@@ -2721,7 +2698,6 @@ function LavanderiaView({ data, actions }) {
         clients={data.clients}
         onBack={() => setNav("dashboard")}
         onOpenDetail={setDetailOrderId}
-        onMarkMessageSeen={actions.markMessageSeen}
       />
     );
   } else if (nav === "clienti") {
@@ -4575,11 +4551,6 @@ export default function App() {
     },
     sendOrderMessage: async (orderId, sender, message) => {
       const res = await api.sendOrderMessage(orderId, sender, message);
-      await refresh();
-      return res;
-    },
-    markMessageSeen: async (orderId) => {
-      const res = await api.markMessageSeen(orderId);
       await refresh();
       return res;
     },

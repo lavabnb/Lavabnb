@@ -1113,7 +1113,18 @@ function OrderDetailAdminScreen({
             </div>
           </div>
         ))}
-        {draftItems.length === 0 && (
+        {reportedOnThisOrder.map((r) => (
+          <div key={r.id} className="flex items-center justify-between px-4 py-3 bg-rose-50/40">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-rose-700 truncate">↩ Reso: {r.itemName}</div>
+              <div className="text-xs text-rose-400">{REASON_LABELS[r.reason] || r.reason}</div>
+            </div>
+            <span className="text-sm font-semibold text-rose-700 shrink-0">
+              -{r.qty}× (-€{r.amount.toFixed(2)})
+            </span>
+          </div>
+        ))}
+        {draftItems.length === 0 && reportedOnThisOrder.length === 0 && (
           <div className="px-4 py-6 text-center text-sm text-gray-400">
             Nessun capo in questo ordine.
           </div>
@@ -1484,13 +1495,32 @@ function DashboardScreen({
 
       {pendingMessages.length > 0 && (
         <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-5">
-          <div className="flex items-center gap-2 text-blue-700 font-semibold">
-            <MessageSquare size={16} /> Messaggi in attesa
+          <div className="flex items-center gap-2 text-blue-700 font-semibold mb-2">
+            <MessageSquare size={16} /> Nuovi messaggi dai clienti
           </div>
-          <div className="text-blue-600 text-sm mt-1">
-            {pendingMessages.length} {pendingMessages.length === 1 ? "ordine ha" : "ordini hanno"} un
-            nuovo messaggio dal cliente da leggere
-          </div>
+          {pendingMessages.map((o) => {
+            const msgs = o.messages || [];
+            const last = msgs[msgs.length - 1];
+            return (
+              <div
+                key={o.id}
+                className="flex items-center justify-between gap-2 py-1.5 border-t border-blue-100 first:border-0"
+              >
+                <div className="text-sm text-blue-800 min-w-0">
+                  <div className="font-semibold truncate">
+                    {clientName(o.clientId)} — Ordine #{o.id}
+                  </div>
+                  {last && <div className="text-xs text-blue-600 truncate">{last.message}</div>}
+                </div>
+                <button
+                  onClick={() => onMarkMessageSeen(o.id)}
+                  className="text-xs font-semibold text-blue-700 border border-blue-300 rounded-full px-3 py-1 shrink-0"
+                >
+                  Segna come letto
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -2549,7 +2579,7 @@ function LavanderiaView({ data, actions }) {
 }
 
 // ================= NUOVO ORDINE (lato Cliente) =================
-function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
+function NewOrderScreen({ client, catalog, lastOrder, availableCredits, onBack, onCreate }) {
   const categories = CATEGORY_ORDER.filter((cat) =>
     catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
   );
@@ -2803,6 +2833,29 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
           </div>
         )}
 
+        {availableCredits && availableCredits.length > 0 && (
+          <div className="mb-4 border border-emerald-200 bg-emerald-50 rounded-2xl p-4">
+            <div className="font-bold text-emerald-800 mb-1">💳 Crediti disponibili</div>
+            <p className="text-xs text-emerald-700 mb-2">
+              Verranno scalati automaticamente dal totale di questo ordine.
+            </p>
+            <div className="divide-y divide-emerald-100">
+              {availableCredits.map((c) => (
+                <div key={c.id} className="flex items-center justify-between py-1.5 text-sm text-emerald-800">
+                  <span>
+                    {c.itemName} — {formatIT(c.createdAt.slice(0, 10))} ({REASON_LABELS[c.reason] || c.reason})
+                  </span>
+                  <span className="font-semibold">€{c.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-emerald-200 text-sm font-bold text-emerald-800">
+              <span>Totale credito disponibile</span>
+              <span>€{availableCredits.reduce((s, c) => s + c.amount, 0).toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+
         <div className="mb-4">
           <div className="font-bold text-gray-900 mb-1">Note (facoltativo)</div>
           <p className="text-xs text-gray-400 mb-2">
@@ -2823,11 +2876,34 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
           <span>{itemCount} capi selezionati</span>
           <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
         </div>
-        {client.paymentMethod === "carta" && (
-          <div className="text-xs text-gray-400 text-right mb-2">
-            IVA 22%: €{(total * 0.22).toFixed(2)} — Totale con IVA: €{(total * 1.22).toFixed(2)}
+        {availableCredits && availableCredits.length > 0 && (
+          <div className="flex items-center justify-between mb-1 text-sm text-emerald-700">
+            <span>Credito applicato</span>
+            <span className="font-semibold">
+              -€{Math.min(total, availableCredits.reduce((s, c) => s + c.amount, 0)).toFixed(2)}
+            </span>
           </div>
         )}
+        {availableCredits && availableCredits.length > 0 && (
+          <div className="flex items-center justify-between mb-1 text-sm font-bold text-gray-900">
+            <span>Totale dopo credito</span>
+            <span>
+              €{Math.max(0, total - availableCredits.reduce((s, c) => s + c.amount, 0)).toFixed(2)}
+            </span>
+          </div>
+        )}
+        {client.paymentMethod === "carta" &&
+          (() => {
+            const afterCredit = availableCredits
+              ? Math.max(0, total - availableCredits.reduce((s, c) => s + c.amount, 0))
+              : total;
+            return (
+              <div className="text-xs text-gray-400 text-right mb-2">
+                IVA 22%: €{(afterCredit * 0.22).toFixed(2)} — Totale con IVA: €
+                {(afterCredit * 1.22).toFixed(2)}
+              </div>
+            );
+          })()}
         <button
           disabled={itemCount === 0 || hasInvalidSlot || validSlots.length === 0}
           onClick={() => {
@@ -2944,6 +3020,11 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
           {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
         </span>
       </div>
+      {order.createdBy === "lavanderia" && (
+        <div className="mt-1 text-[11px] font-bold text-gray-500 flex items-center gap-1">
+          🏭 Inserito dalla lavanderia
+        </div>
+      )}
       {order.paymentMethod === "carta" && (
         <div className="text-xs text-gray-400 text-right -mt-1 mb-1">
           + IVA 22% (€{(order.total * 0.22).toFixed(2)}) = €{(order.total * 1.22).toFixed(2)} totale
@@ -4033,11 +4114,15 @@ function ClienteDashboard({ data, client, actions }) {
 
   if (subScreen === "newOrder") {
     const lastOrder = myOrders.filter((o) => o.status === "consegnato").sort((a, b) => b.id - a.id)[0] || null;
+    const availableCredits = (data.returns || [])
+      .filter((r) => r.clientId === client.id && !r.applied)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return (
       <NewOrderScreen
         client={client}
         catalog={data.catalog}
         lastOrder={lastOrder}
+        availableCredits={availableCredits}
         onBack={() => setSubScreen("dashboard")}
         onCreate={(payload) => {
           actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });

@@ -181,8 +181,6 @@ export async function fetchAll() {
     deliveryTime: o.delivery_time ? o.delivery_time.slice(0, 5) : null,
     note: o.note || "",
     lastModification: o.last_modification || "",
-    invoiced: !!o.invoiced,
-    staffMessageSeen: o.staff_message_seen !== false,
     paymentMethod: o.payment_method || "contanti",
     createdBy: o.created_by || "client",
     total: Number(o.total),
@@ -372,7 +370,6 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
       // Non blocco l'intero ordine per una nota non salvata: la segnalo soltanto.
       console.error("createOrder note->message error:", msgError);
     } else {
-      await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
       await addNotification(
         clientId,
         `Nuovo messaggio dal cliente sull'ordine #${orderId}: "${note.trim()}"`,
@@ -418,7 +415,6 @@ export async function sendOrderMessage(orderId, sender, message) {
         );
       }
     } else {
-      await neon.from("orders").update({ staff_message_seen: false }).eq("id", orderId);
       const clientId = await getOrderClientId(orderId);
       if (clientId) {
         await addNotification(
@@ -432,20 +428,6 @@ export async function sendOrderMessage(orderId, sender, message) {
   } catch (e) {
     console.error("sendOrderMessage error:", e);
     return { ok: false, error: "Errore nell'invio del messaggio: " + (e.message || String(e)) };
-  }
-}
-
-export async function markMessageSeen(orderId) {
-  try {
-    const { error } = await neon
-      .from("orders")
-      .update({ staff_message_seen: true })
-      .eq("id", orderId);
-    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
-    return { ok: true };
-  } catch (e) {
-    console.error("markMessageSeen error:", e);
-    return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }
 

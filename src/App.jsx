@@ -109,7 +109,7 @@ function isDeliverySoon(order) {
 function hasClientMessage(order) {
   const messages = order.messages || [];
   const last = messages[messages.length - 1];
-  return !!last && last.sender === "client";
+  return !!last && last.sender === "client" && order.status !== "consegnato";
 }
 
 // ---------- Catalogo & clienti (seed) ----------
@@ -2188,6 +2188,80 @@ function PendingPaymentsScreen({ orders, clients, method, title, subtitle, onBac
   );
 }
 
+function OrphanReturnsScreen({ returns, orders, clients, onBack, onDeleteReturn }) {
+  const orderIds = new Set(orders.map((o) => o.id));
+  const orphans = returns.filter(
+    (r) =>
+      (r.orderId && !orderIds.has(r.orderId)) || (r.appliedOrderId && !orderIds.has(r.appliedOrderId))
+  );
+  const [deletingId, setDeletingId] = useState(null);
+  const [errorId, setErrorId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  return (
+    <div className="px-6 pt-5 pb-8">
+      <ScreenHeader
+        title="Resi orfani (strumento temporaneo)"
+        subtitle="Resi collegati a ordini ormai cancellati"
+        onBack={onBack}
+      />
+      {orphans.length === 0 && (
+        <p className="text-gray-400 text-sm py-8 text-center">
+          Nessun reso orfano trovato. 🎉
+        </p>
+      )}
+      {orphans.map((r) => (
+        <div key={r.id} className="border border-rose-200 rounded-2xl p-4 mb-3">
+          <div className="font-bold text-gray-900 text-sm">{getClientName(clients, r.clientId)}</div>
+          <div className="text-xs text-gray-400 mb-1">
+            {r.orderId && !orderIds.has(r.orderId) && (
+              <span>Origine: ordine #{r.orderId} (non esiste più) </span>
+            )}
+            {r.appliedOrderId && !orderIds.has(r.appliedOrderId) && (
+              <span>Applicato a: ordine #{r.appliedOrderId} (non esiste più)</span>
+            )}
+          </div>
+          <div className="text-sm text-gray-700">
+            {r.qty}× {r.itemName} — €{r.amount.toFixed(2)}
+          </div>
+          {errorId === r.id && <div className="text-xs text-rose-600 mt-2">{errorMsg}</div>}
+          {deletingId === r.id ? (
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={async () => {
+                  const res = await onDeleteReturn(r.id);
+                  if (res && res.ok === false) {
+                    setErrorId(r.id);
+                    setErrorMsg(res.error);
+                  } else {
+                    setDeletingId(null);
+                  }
+                }}
+                className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-sm font-semibold"
+              >
+                Sì, elimina
+              </button>
+              <button
+                onClick={() => setDeletingId(null)}
+                className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm font-semibold"
+              >
+                Annulla
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setDeletingId(r.id)}
+              className="mt-2 border border-rose-300 text-rose-600 rounded-lg px-3 py-1.5 text-xs font-semibold"
+            >
+              Elimina definitivamente
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ResiScreen({ returns, clients, orders, onBack, onOpenDetail, onApplyCredit }) {
   const clientName = (id) => getClientName(clients, id);
   const sorted = [...returns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -2295,7 +2369,7 @@ function ResiScreen({ returns, clients, orders, onBack, onOpenDetail, onApplyCre
   );
 }
 
-function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment, onApplyCredit }) {
+function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, onConfirmPayment, onApplyCredit, onDeleteReturn }) {
   const weightOf = (itemId) => catalog.find((c) => c.id === itemId)?.weightKg || 0;
   const clientName = (id) => getClientName(clients, id);
   const consegnati = orders.filter((o) => o.status === "consegnato");
@@ -2352,6 +2426,7 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
   const [viewingFatturare, setViewingFatturare] = useState(false);
   const [viewingSaldare, setViewingSaldare] = useState(false);
   const [viewingResi, setViewingResi] = useState(false);
+  const [viewingOrphans, setViewingOrphans] = useState(false);
   const resiDaApplicare = (returns || []).filter((r) => !r.applied).length;
   const daSaldareContantiGlobale = orders.filter(
     (o) => o.status === "consegnato" && o.paymentMethod === "contanti" && o.paymentStatus !== "saldato"
@@ -2413,6 +2488,18 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
     );
   }
 
+  if (viewingOrphans) {
+    return (
+      <OrphanReturnsScreen
+        returns={returns || []}
+        orders={orders}
+        clients={clients}
+        onBack={() => setViewingOrphans(false)}
+        onDeleteReturn={onDeleteReturn}
+      />
+    );
+  }
+
   if (viewingClientId) {
     return (
       <ClientInvoiceScreen
@@ -2449,13 +2536,20 @@ function StatisticheScreen({ orders, clients, catalog, returns, onOpenDetail, on
 
       <button
         onClick={() => setViewingResi(true)}
-        className="w-full border border-rose-200 bg-rose-50 rounded-2xl p-4 mb-5 text-left flex items-center justify-between"
+        className="w-full border border-rose-200 bg-rose-50 rounded-2xl p-4 mb-2 text-left flex items-center justify-between"
       >
         <div>
           <div className="text-xs text-rose-700">Resi da applicare</div>
           <div className="text-2xl font-bold mt-1 text-rose-700">{resiDaApplicare}</div>
         </div>
         <ChevronDown size={18} className="text-rose-600 -rotate-90" />
+      </button>
+
+      <button
+        onClick={() => setViewingOrphans(true)}
+        className="w-full text-center text-xs text-gray-400 underline mb-5"
+      >
+        Strumento temporaneo: trova resi orfani (ordini cancellati)
       </button>
 
       <div className="border border-gray-200 rounded-2xl p-4 mb-5">
@@ -2755,6 +2849,7 @@ function LavanderiaView({ data, actions }) {
         onOpenDetail={setDetailOrderId}
         onConfirmPayment={actions.confirmPayment}
         onApplyCredit={actions.applyReturnsToOrder}
+        onDeleteReturn={actions.deleteReturn}
       />
     );
   }
@@ -4556,6 +4651,11 @@ export default function App() {
     },
     markReturnSeen: async (returnId) => {
       const res = await api.markReturnSeen(returnId);
+      await refresh();
+      return res;
+    },
+    deleteReturn: async (returnId) => {
+      const res = await api.deleteReturn(returnId);
       await refresh();
       return res;
     },

@@ -442,6 +442,20 @@ export async function markReturnSeen(returnId) {
   }
 }
 
+export async function deleteReturn(returnId) {
+  try {
+    const { error, data } = await neon.from("returns").delete().eq("id", returnId).select();
+    if (error) return { ok: false, error: "Non ho potuto eliminare: " + error.message };
+    if (!data || data.length === 0) {
+      return { ok: false, error: "Il reso non risulta eliminato (probabile problema di permessi)." };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("deleteReturn error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds }) {
   const status = deliveryDate ? "programmato" : "nuovo";
   const { data, error } = await neon

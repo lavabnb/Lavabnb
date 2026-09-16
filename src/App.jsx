@@ -1456,7 +1456,9 @@ function DashboardScreen({
 
   return (
     <div className="px-6 pt-5">
-      <img src="/logo.png" alt="LavaBNB" className="h-7 mb-4" />
+      <div className="flex justify-center mb-4">
+        <img src="/logo.png" alt="LavaBNB" className="h-7" />
+      </div>
       <div className="flex items-start justify-between">
         <ScreenHeader title="Dashboard Lavanderia" subtitle="Gestisci tutti gli ordini e comunicazioni" />
         <button
@@ -3742,7 +3744,9 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
 
   return (
     <div className="px-6 pt-6 pb-8 h-full overflow-y-auto">
-      <img src="/logo.png" alt="LavaBNB" className="h-9 mb-4" />
+      <div className="flex justify-center mb-4">
+        <img src="/logo.png" alt="LavaBNB" className="h-9" />
+      </div>
       <p className="text-gray-500 text-sm mb-5">Accedi o registra la tua struttura</p>
 
       <div className="flex bg-gray-100 rounded-full p-1 mb-5">
@@ -4430,7 +4434,9 @@ function ClienteDashboard({ data, client, actions }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto px-6 pt-5">
-        <img src="/logo.png" alt="LavaBNB" className="h-7 mb-4" />
+        <div className="flex justify-center mb-4">
+          <img src="/logo.png" alt="LavaBNB" className="h-7" />
+        </div>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-2xl font-bold text-gray-900">Ciao, {client.name}! 👋</h2>
           <div className="flex items-center gap-3 shrink-0">
@@ -4502,7 +4508,9 @@ function ClienteDashboard({ data, client, actions }) {
 
 function ClienteView({ data, client, actions }) {
   const needsProfile =
-    !client.account.phone || !client.account.deliveryAddress || !client.account.billingVat;
+    !client.account.phone ||
+    !client.account.deliveryAddress ||
+    (client.clientType === "azienda" && !client.account.billingVat);
   if (needsProfile) {
     return (
       <CompleteProfileScreen

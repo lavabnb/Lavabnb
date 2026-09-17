@@ -135,13 +135,14 @@ export async function signOut() {
 // ---------------- Lettura dati ----------------
 
 export async function fetchAll() {
-  const [catalogRes, clientsRes, ordersRes, notifRes, staffRes, returnsRes] = await Promise.all([
+  const [catalogRes, clientsRes, ordersRes, notifRes, staffRes, returnsRes, addressesRes] = await Promise.all([
     neon.from("catalog_items").select("*").order("category"),
     neon.from("clients").select("*, client_pricing(item_id, price)"),
     neon.from("orders").select("*, order_items(*), order_slots(*), order_messages(*)"),
     neon.from("notifications").select("*"),
     neon.from("staff").select("user_id"),
     neon.from("returns").select("*"),
+    neon.from("client_addresses").select("*").order("created_at"),
   ]);
 
   const catalog = (catalogRes.data || []).map((r) => ({
@@ -183,6 +184,13 @@ export async function fetchAll() {
     lastModification: o.last_modification || "",
     paymentMethod: o.payment_method || "contanti",
     createdBy: o.created_by || "client",
+    addressId: o.address_id || null,
+    addressLabel: o.address_label || "",
+    addressSnapshot: o.address_snapshot || "",
+    addressIntercom: o.address_intercom || "",
+    addressFloor: o.address_floor || "",
+    addressUnit: o.address_unit || "",
+    addressNotes: o.address_notes || "",
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -227,9 +235,22 @@ export async function fetchAll() {
     staffSeen: r.staff_seen !== false,
   }));
 
+  const addresses = (addressesRes.data || []).map((a) => ({
+    id: a.id,
+    clientId: a.client_id,
+    label: a.label,
+    address: a.address,
+    intercom: a.intercom || "",
+    floor: a.floor || "",
+    unit: a.unit || "",
+    notes: a.notes || "",
+    isDefault: !!a.is_default,
+    createdAt: a.created_at,
+  }));
+
   const isStaff = (staffRes.data || []).length > 0;
 
-  return { catalog, clients, orders, notifications, returns, isStaff };
+  return { catalog, clients, orders, notifications, returns, addresses, isStaff };
 }
 
 // ---------------- Clienti / listino ----------------
@@ -325,7 +346,7 @@ export async function addNotification(clientId, message, audience = "client") {
 // ---------------- Ordini ----------------
 
 
-export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod }) {
+export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod, address }) {
   const { data, error } = await neon
     .from("orders")
     .insert([{
@@ -335,6 +356,13 @@ export async function createOrder({ clientId, items, total, preferredSlots, note
       note: note || "",
       payment_method: paymentMethod || "contanti",
       created_by: "client",
+      address_id: address?.id || null,
+      address_label: address?.label || "",
+      address_snapshot: address?.address || "",
+      address_intercom: address?.intercom || "",
+      address_floor: address?.floor || "",
+      address_unit: address?.unit || "",
+      address_notes: address?.notes || "",
     }])
     .select();
   if (error || !data || !data[0]) {
@@ -456,7 +484,7 @@ export async function deleteReturn(returnId) {
   }
 }
 
-export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds }) {
+export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds, address }) {
   const status = deliveryDate ? "programmato" : "nuovo";
   const { data, error } = await neon
     .from("orders")
@@ -469,6 +497,13 @@ export async function adminCreateOrder({ clientId, items, total, deliveryDate, d
         delivery_time: deliveryTime || null,
         payment_method: paymentMethod || "contanti",
         created_by: "lavanderia",
+        address_id: address?.id || null,
+        address_label: address?.label || "",
+        address_snapshot: address?.address || "",
+        address_intercom: address?.intercom || "",
+        address_floor: address?.floor || "",
+        address_unit: address?.unit || "",
+        address_notes: address?.notes || "",
       },
     ])
     .select();
@@ -698,6 +733,73 @@ export async function deleteClient(clientId) {
   } catch (e) {
     console.error("deleteClient error:", e);
     return { ok: false, error: "Errore nell'eliminazione: " + (e.message || String(e)) };
+  }
+}
+
+// ---------------- Appartamenti/indirizzi ----------------
+
+export async function createAddress(clientId, fields) {
+  try {
+    if (fields.isDefault) {
+      await neon.from("client_addresses").update({ is_default: false }).eq("client_id", clientId);
+    }
+    const { error } = await neon.from("client_addresses").insert([
+      {
+        client_id: clientId,
+        label: fields.label,
+        address: fields.address,
+        intercom: fields.intercom || "",
+        floor: fields.floor || "",
+        unit: fields.unit || "",
+        notes: fields.notes || "",
+        is_default: !!fields.isDefault,
+      },
+    ]);
+    if (error) return { ok: false, error: "Non ho potuto salvare l'appartamento: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("createAddress error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+export async function updateAddress(addressId, fields) {
+  try {
+    if (fields.isDefault) {
+      const { data } = await neon.from("client_addresses").select("client_id").eq("id", addressId);
+      const clientId = data && data[0] ? data[0].client_id : null;
+      if (clientId) {
+        await neon.from("client_addresses").update({ is_default: false }).eq("client_id", clientId);
+      }
+    }
+    const { error } = await neon
+      .from("client_addresses")
+      .update({
+        label: fields.label,
+        address: fields.address,
+        intercom: fields.intercom || "",
+        floor: fields.floor || "",
+        unit: fields.unit || "",
+        notes: fields.notes || "",
+        is_default: !!fields.isDefault,
+      })
+      .eq("id", addressId);
+    if (error) return { ok: false, error: "Non ho potuto salvare le modifiche: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("updateAddress error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+export async function deleteAddress(addressId) {
+  try {
+    const { error } = await neon.from("client_addresses").delete().eq("id", addressId);
+    if (error) return { ok: false, error: "Non ho potuto eliminare l'appartamento: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("deleteAddress error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }
 

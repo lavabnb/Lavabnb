@@ -159,6 +159,7 @@ export async function fetchAll() {
     name: c.name,
     paymentMethod: c.payment_method || "contanti",
     deliveryFee: Number(c.delivery_fee || 0),
+    deliveryEnabled: !!c.delivery_enabled,
     clientType: c.client_type || "privato",
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
@@ -288,13 +289,20 @@ export async function setClientPaymentMethod(clientId, method) {
   }
 }
 
-export async function setClientDeliveryFee(clientId, fee) {
+export async function setClientDelivery(clientId, enabled, fee) {
   try {
-    const { error } = await neon.from("clients").update({ delivery_fee: fee }).eq("id", clientId);
+    const { error, data } = await neon
+      .from("clients")
+      .update({ delivery_enabled: enabled, delivery_fee: enabled ? fee : 0 })
+      .eq("id", clientId)
+      .select();
     if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    if (!data || data.length === 0) {
+      return { ok: false, error: "Il salvataggio non ha avuto effetto (probabile problema di permessi)." };
+    }
     return { ok: true };
   } catch (e) {
-    console.error("setClientDeliveryFee error:", e);
+    console.error("setClientDelivery error:", e);
     return { ok: false, error: "Errore: " + (e.message || String(e)) };
   }
 }

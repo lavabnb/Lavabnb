@@ -158,6 +158,7 @@ export async function fetchAll() {
     userId: c.user_id,
     name: c.name,
     paymentMethod: c.payment_method || "contanti",
+    deliveryFee: Number(c.delivery_fee || 0),
     clientType: c.client_type || "privato",
     pricing: Object.fromEntries(
       (c.client_pricing || []).map((p) => [p.item_id, Number(p.price)])
@@ -183,6 +184,7 @@ export async function fetchAll() {
     note: o.note || "",
     lastModification: o.last_modification || "",
     paymentMethod: o.payment_method || "contanti",
+    deliveryFee: Number(o.delivery_fee || 0),
     createdBy: o.created_by || "client",
     addressId: o.address_id || null,
     addressLabel: o.address_label || "",
@@ -286,6 +288,17 @@ export async function setClientPaymentMethod(clientId, method) {
   }
 }
 
+export async function setClientDeliveryFee(clientId, fee) {
+  try {
+    const { error } = await neon.from("clients").update({ delivery_fee: fee }).eq("id", clientId);
+    if (error) return { ok: false, error: "Non ho potuto salvare: " + error.message };
+    return { ok: true };
+  } catch (e) {
+    console.error("setClientDeliveryFee error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function completeProfile(clientId, fields) {
   try {
     const { error } = await neon
@@ -346,12 +359,14 @@ export async function addNotification(clientId, message, audience = "client") {
 // ---------------- Ordini ----------------
 
 
-export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod, address }) {
+export async function createOrder({ clientId, items, total, preferredSlots, note, returns, paymentMethod, address, deliveryFee }) {
+  const fee = Number(deliveryFee || 0);
   const { data, error } = await neon
     .from("orders")
     .insert([{
       client_id: clientId,
-      total,
+      total: total + fee,
+      delivery_fee: fee,
       status: "nuovo",
       note: note || "",
       payment_method: paymentMethod || "contanti",
@@ -484,14 +499,16 @@ export async function deleteReturn(returnId) {
   }
 }
 
-export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds, address }) {
+export async function adminCreateOrder({ clientId, items, total, deliveryDate, deliveryTime, paymentMethod, returnIds, address, deliveryFee }) {
   const status = deliveryDate ? "programmato" : "nuovo";
+  const fee = Number(deliveryFee || 0);
   const { data, error } = await neon
     .from("orders")
     .insert([
       {
         client_id: clientId,
-        total,
+        total: total + fee,
+        delivery_fee: fee,
         status,
         delivery_date: deliveryDate || null,
         delivery_time: deliveryTime || null,

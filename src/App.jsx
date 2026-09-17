@@ -250,6 +250,7 @@ function ClientiListScreen({ clients, orders, onOpen }) {
 function ClientDetailScreen({
   client,
   catalog,
+  addresses,
   onBack,
   onSetPrice,
   onRemoveItem,
@@ -259,6 +260,9 @@ function ClientDetailScreen({
   onDeleteClient,
   onSetPaymentMethod,
   onAddCredit,
+  onAddAddress,
+  onEditAddress,
+  onDeleteAddress,
 }) {
   const [addingItem, setAddingItem] = useState(null); // category or null
   const [newName, setNewName] = useState("");
@@ -370,7 +374,7 @@ function ClientDetailScreen({
         ) : (
           <div>
             <p className="text-xs text-gray-400 mb-2">
-              Verrà scalato automaticamente dal prossimo ordine del cliente.
+              Resterà disponibile finché non lo applichi tu a un ordine, dalla sezione Resi.
             </p>
             <input
               type="text"
@@ -406,6 +410,17 @@ function ClientDetailScreen({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="mb-6">
+        <div className="text-sm font-bold text-gray-900 mb-2">Strutture del cliente</div>
+        <AddressList
+          addresses={addresses}
+          onAdd={(fields) => onAddAddress(client.id, fields)}
+          onEdit={onEditAddress}
+          onDelete={onDeleteAddress}
+          addLabel="+ Aggiungi struttura per questo cliente"
+        />
       </div>
 
       {CATEGORY_ORDER.map((cat) => {
@@ -712,6 +727,9 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
             )}
           </div>
           <div className="text-sm text-gray-500 mt-0.5">{clientName}</div>
+          {order.addressLabel && (
+            <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
+          )}
           <div className="text-sm text-gray-500 mt-0.5">
             {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
           </div>
@@ -1067,6 +1085,26 @@ function OrderDetailAdminScreen({
   return (
     <div className="px-6 pt-5 pb-8">
       <ScreenHeader title={`Ordine #${order.id}`} subtitle={clientName} onBack={onBack} />
+
+      {order.addressSnapshot && (
+        <div className="border border-gray-200 rounded-xl px-4 py-3 mb-5">
+          <div className="text-xs font-bold text-gray-400 uppercase mb-1">Consegna presso</div>
+          <div className="text-sm font-semibold text-gray-900">{order.addressLabel}</div>
+          <div className="text-sm text-gray-600">{order.addressSnapshot}</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            {[
+              order.addressFloor && `Piano ${order.addressFloor}`,
+              order.addressUnit && `Interno ${order.addressUnit}`,
+              order.addressIntercom && `Citofono: ${order.addressIntercom}`,
+            ]
+              .filter(Boolean)
+              .join(" • ")}
+          </div>
+          {order.addressNotes && (
+            <div className="text-xs text-gray-400 mt-1">{order.addressNotes}</div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <StatusDot status={order.status} />
@@ -1603,7 +1641,7 @@ function DashboardScreen({
   );
 }
 
-function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
+function AdminNewOrderScreen({ clients, catalog, returns, addresses, onAddAddress, onBack, onCreate }) {
   const eligibleClients = clients.filter((c) => Object.keys(c.pricing).length > 0);
   const [clientId, setClientId] = useState(eligibleClients[0]?.id || "");
   const [category, setCategory] = useState("");
@@ -1614,12 +1652,15 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
   const [selectedReturnIds, setSelectedReturnIds] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [selectedAddressId, setSelectedAddressId] = useState(null);
+  const [addingAddress, setAddingAddress] = useState(false);
 
   const client = clients.find((c) => c.id === clientId);
   const availableReturns = (returns || []).filter((r) => r.clientId === clientId && !r.applied);
   const selectedReturnsTotal = availableReturns
     .filter((r) => selectedReturnIds.includes(r.id))
     .reduce((s, r) => s + r.amount, 0);
+  const clientAddresses = (addresses || []).filter((a) => a.clientId === clientId);
   const categories = client
     ? CATEGORY_ORDER.filter((cat) =>
         catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
@@ -1632,6 +1673,9 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
     }
     setQty({});
     setSelectedReturnIds([]);
+    const clientAddrs = (addresses || []).filter((a) => a.clientId === clientId);
+    setSelectedAddressId(clientAddrs.find((a) => a.isDefault)?.id || clientAddrs[0]?.id || null);
+    setAddingAddress(clientAddrs.length === 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
@@ -1676,6 +1720,41 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="mb-3">
+          <div className="text-xs font-semibold text-gray-500 mb-1.5">Consegna presso</div>
+          {addingAddress ? (
+            <AddressForm
+              initial={null}
+              onSave={async (fields) => {
+                const res = await onAddAddress(clientId, fields);
+                if (res && res.ok !== false) setAddingAddress(false);
+                return res;
+              }}
+              onCancel={() => clientAddresses.length > 0 && setAddingAddress(false)}
+            />
+          ) : (
+            <>
+              <select
+                value={selectedAddressId || ""}
+                onChange={(e) => setSelectedAddressId(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-1.5"
+              >
+                {clientAddresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label} — {a.address}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setAddingAddress(true)}
+                className="text-xs font-semibold text-gray-500 underline"
+              >
+                + Aggiungi una struttura per questo cliente
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1799,7 +1878,7 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
           </div>
         )}
         <button
-          disabled={itemCount === 0 || !clientId || submitting}
+          disabled={itemCount === 0 || !clientId || !selectedAddressId || submitting}
           onClick={async () => {
             setSubmitError("");
             setSubmitting(true);
@@ -1819,6 +1898,7 @@ function AdminNewOrderScreen({ clients, catalog, returns, onBack, onCreate }) {
               deliveryTime: scheduleNow ? time : null,
               paymentMethod: client.paymentMethod,
               returnIds: selectedReturnIds,
+              address: clientAddresses.find((a) => a.id === selectedAddressId) || null,
             });
             setSubmitting(false);
             if (res && res.ok === false) {
@@ -1892,6 +1972,9 @@ function ArchivioScreen({ orders, clients, onBack, onOpenDetail }) {
             </span>
           </div>
           <div className="text-sm text-gray-500 mt-1">{clientName(o.clientId)}</div>
+          {o.addressLabel && (
+            <div className="text-xs text-gray-400 mt-0.5">📍 {o.addressLabel}</div>
+          )}
           <div className="flex items-center justify-between mt-1">
             <span className="text-sm text-gray-500">€{o.total.toFixed(2)}</span>
             <button
@@ -2704,6 +2787,8 @@ function LavanderiaView({ data, actions }) {
             clients={data.clients}
             catalog={data.catalog}
             returns={data.returns}
+            addresses={data.addresses}
+            onAddAddress={actions.createAddress}
             onBack={() => setCreatingOrder(false)}
             onCreate={async (payload) => {
               const res = await actions.adminCreateOrder(payload);
@@ -2803,6 +2888,7 @@ function LavanderiaView({ data, actions }) {
       <ClientDetailScreen
         client={client}
         catalog={data.catalog}
+        addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
         onBack={() => setClientDetailId(null)}
         onSetPrice={actions.setClientPrice}
         onRemoveItem={actions.removeClientItem}
@@ -2814,6 +2900,9 @@ function LavanderiaView({ data, actions }) {
           setClientDetailId(null);
         }}
         onSetPaymentMethod={actions.setClientPaymentMethod}
+        onAddAddress={actions.createAddress}
+        onEditAddress={actions.updateAddress}
+        onDeleteAddress={actions.deleteAddress}
         onAddCredit={(clientId, amount, note) =>
           actions.createReturn({
             clientId,
@@ -2873,7 +2962,7 @@ function LavanderiaView({ data, actions }) {
 }
 
 // ================= NUOVO ORDINE (lato Cliente) =================
-function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
+function NewOrderScreen({ client, catalog, lastOrder, addresses, onAddAddress, onBack, onCreate }) {
   const categories = CATEGORY_ORDER.filter((cat) =>
     catalog.some((it) => it.category === cat && client.pricing[it.id] !== undefined)
   );
@@ -2887,6 +2976,10 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
   const [returnNote, setReturnNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [selectedAddressId, setSelectedAddressId] = useState(
+    () => addresses.find((a) => a.isDefault)?.id || addresses[0]?.id || null
+  );
+  const [addingAddress, setAddingAddress] = useState(addresses.length === 0);
 
   if (categories.length === 0) {
     return (
@@ -2928,6 +3021,40 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
           subtitle="Crea un nuovo ordine per la biancheria"
           onBack={onBack}
         />
+      </div>
+
+      <div className="px-6 mb-2">
+        <div className="text-xs font-semibold text-gray-500 mb-2">Consegna presso</div>
+        {addingAddress ? (
+          <AddressForm
+            onSave={async (fields) => {
+              const res = await onAddAddress(client.id, fields);
+              if (res && res.ok !== false) setAddingAddress(false);
+              return res;
+            }}
+            onCancel={() => addresses.length > 0 && setAddingAddress(false)}
+          />
+        ) : (
+          <>
+            <select
+              value={selectedAddressId || ""}
+              onChange={(e) => setSelectedAddressId(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm mb-2"
+            >
+              {addresses.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label} — {a.address}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setAddingAddress(true)}
+              className="text-xs font-semibold text-gray-500 underline"
+            >
+              + Aggiungi un'altra struttura
+            </button>
+          </>
+        )}
       </div>
 
       <div className="px-6 flex gap-1 border-b border-gray-100 overflow-x-auto no-scrollbar">
@@ -3160,7 +3287,9 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
           </div>
         )}
         <button
-          disabled={itemCount === 0 || hasInvalidSlot || validSlots.length === 0 || submitting}
+          disabled={
+            itemCount === 0 || hasInvalidSlot || validSlots.length === 0 || submitting || !selectedAddressId
+          }
           onClick={async () => {
             setSubmitError("");
             setSubmitting(true);
@@ -3177,6 +3306,7 @@ function NewOrderScreen({ client, catalog, lastOrder, onBack, onCreate }) {
               total,
               preferredSlots: validSlots,
               note: note.trim(),
+              address: addresses.find((a) => a.id === selectedAddressId) || null,
               returns: returnItemsToSend.map((it) => ({
                 orderId: lastOrder.id,
                 itemName: it.name,
@@ -3285,6 +3415,9 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
         <div className="mt-1 text-[11px] font-bold text-gray-500 flex items-center gap-1">
           🏭 Inserito dalla lavanderia
         </div>
+      )}
+      {order.addressLabel && (
+        <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
       )}
       {order.paymentMethod === "carta" && (
         <div className="text-xs text-gray-400 text-right -mt-1 mb-1">
@@ -3944,6 +4077,223 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
   );
 }
 
+function AddressForm({ initial, onSave, onCancel }) {
+  const [label, setLabel] = useState(initial?.label || "");
+  const [address, setAddress] = useState(initial?.address || "");
+  const [intercom, setIntercom] = useState(initial?.intercom || "");
+  const [floor, setFloor] = useState(initial?.floor || "");
+  const [unit, setUnit] = useState(initial?.unit || "");
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const [isDefault, setIsDefault] = useState(initial?.isDefault ?? !initial);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    if (!label.trim()) {
+      setError("Dai un nome a questa struttura (es. \"Hotel Duomo\").");
+      return;
+    }
+    if (!address.trim()) {
+      setError("Inserisci l'indirizzo completo.");
+      return;
+    }
+    setBusy(true);
+    const res = await onSave({
+      label: label.trim(),
+      address: address.trim(),
+      intercom: intercom.trim(),
+      floor: floor.trim(),
+      unit: unit.trim(),
+      notes: notes.trim(),
+      isDefault,
+    });
+    setBusy(false);
+    if (res && res.ok === false) setError(res.error);
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-2xl p-4">
+      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+      <input
+        placeholder="Nome struttura (es. Hotel Duomo)"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+      />
+      <input
+        placeholder="Indirizzo completo"
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+      />
+      <div className="flex gap-2 mb-2">
+        <input
+          placeholder="Piano"
+          value={floor}
+          onChange={(e) => setFloor(e.target.value)}
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+        />
+        <input
+          placeholder="Interno"
+          value={unit}
+          onChange={(e) => setUnit(e.target.value)}
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+        />
+      </div>
+      <input
+        placeholder="Citofono"
+        value={intercom}
+        onChange={(e) => setIntercom(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+      />
+      <textarea
+        placeholder="Note per la consegna (facoltativo)"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+      />
+      <label className="flex items-center gap-2 mb-3 select-none">
+        <input
+          type="checkbox"
+          checked={isDefault}
+          onChange={(e) => setIsDefault(e.target.checked)}
+          className="w-4 h-4 accent-gray-900"
+        />
+        <span className="text-sm text-gray-600">Usa come struttura predefinita</span>
+      </label>
+      <div className="flex gap-2">
+        <button
+          disabled={busy}
+          onClick={submit}
+          className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+        >
+          Salva
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold"
+        >
+          Annulla
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddressList({ addresses, onAdd, onEdit, onDelete, addLabel = "+ Aggiungi struttura" }) {
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  return (
+    <div>
+      {addresses.map((a) =>
+        editingId === a.id ? (
+          <div key={a.id} className="mb-3">
+            <AddressForm
+              initial={a}
+              onSave={async (fields) => {
+                const res = await onEdit(a.id, fields);
+                if (res && res.ok !== false) setEditingId(null);
+                return res;
+              }}
+              onCancel={() => setEditingId(null)}
+            />
+          </div>
+        ) : (
+          <div key={a.id} className="border border-gray-200 rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-gray-900 text-sm">{a.label}</span>
+                {a.isDefault && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">
+                    PREDEFINITO
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="text-sm text-gray-600 mt-1">{a.address}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {[a.floor && `Piano ${a.floor}`, a.unit && `Interno ${a.unit}`, a.intercom && `Citofono: ${a.intercom}`]
+                .filter(Boolean)
+                .join(" • ")}
+            </div>
+            {a.notes && <div className="text-xs text-gray-400 mt-0.5">{a.notes}</div>}
+            <div className="flex gap-3 mt-2">
+              <button
+                onClick={() => setEditingId(a.id)}
+                className="text-xs font-semibold text-gray-500 underline"
+              >
+                Modifica
+              </button>
+              {confirmDeleteId === a.id ? (
+                <span className="flex items-center gap-2 text-xs">
+                  <span className="text-rose-600">Eliminare?</span>
+                  <button onClick={() => onDelete(a.id)} className="font-semibold text-rose-600 underline">
+                    Sì
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="font-semibold text-gray-500 underline"
+                  >
+                    No
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmDeleteId(a.id)}
+                  className="text-xs font-semibold text-rose-500 underline"
+                >
+                  Elimina
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      )}
+
+      {adding ? (
+        <AddressForm
+          onSave={async (fields) => {
+            const res = await onAdd(fields);
+            if (res && res.ok !== false) setAdding(false);
+            return res;
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="w-full border border-dashed border-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-semibold"
+        >
+          {addLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddressesScreen({ client, addresses, onBack, onAdd, onEdit, onDelete }) {
+  return (
+    <div className="px-6 pt-5 pb-8">
+      <ScreenHeader title="Le mie strutture" subtitle="Gestisci gli indirizzi di consegna" onBack={onBack} />
+      {addresses.length === 0 && (
+        <p className="text-gray-400 text-sm mb-4">
+          Non hai ancora salvato nessuna struttura. Aggiungine una per poter creare un ordine.
+        </p>
+      )}
+      <AddressList
+        addresses={addresses}
+        onAdd={(fields) => onAdd(client.id, fields)}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
 function CompleteProfileScreen({ client, onComplete, onLogout, onBack }) {
   const [businessName, setBusinessName] = useState(client.name || "");
   const [clientType, setClientType] = useState(client.clientType || "privato");
@@ -4382,6 +4732,8 @@ function ClienteDashboard({ data, client, actions }) {
         client={client}
         catalog={data.catalog}
         lastOrder={lastOrder}
+        addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
+        onAddAddress={actions.createAddress}
         onBack={() => setSubScreen("dashboard")}
         onCreate={async (payload) => {
           const res = await actions.addOrder({ clientId: client.id, paymentMethod: client.paymentMethod, ...payload });
@@ -4398,6 +4750,19 @@ function ClienteDashboard({ data, client, actions }) {
         client={client}
         onComplete={(fields) => actions.completeProfile(client.id, fields)}
         onBack={() => setSubScreen("dashboard")}
+      />
+    );
+  }
+
+  if (subScreen === "addresses") {
+    return (
+      <AddressesScreen
+        client={client}
+        addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
+        onBack={() => setSubScreen("dashboard")}
+        onAdd={actions.createAddress}
+        onEdit={actions.updateAddress}
+        onDelete={actions.deleteAddress}
       />
     );
   }
@@ -4454,6 +4819,12 @@ function ClienteDashboard({ data, client, actions }) {
             </button>
           </div>
         </div>
+        <button
+          onClick={() => setSubScreen("addresses")}
+          className="text-xs font-semibold text-gray-400 flex items-center gap-1 mb-1"
+        >
+          <Home size={13} /> Le mie strutture ({(data.addresses || []).filter((a) => a.clientId === client.id).length})
+        </button>
         <p className="text-gray-500 mt-1 mb-5">Gestisci i tuoi ordini di biancheria</p>
 
         <button
@@ -4666,6 +5037,21 @@ export default function App() {
     },
     deleteReturn: async (returnId) => {
       const res = await api.deleteReturn(returnId);
+      await refresh();
+      return res;
+    },
+    createAddress: async (clientId, fields) => {
+      const res = await api.createAddress(clientId, fields);
+      await refresh();
+      return res;
+    },
+    updateAddress: async (addressId, fields) => {
+      const res = await api.updateAddress(addressId, fields);
+      await refresh();
+      return res;
+    },
+    deleteAddress: async (addressId) => {
+      const res = await api.deleteAddress(addressId);
       await refresh();
       return res;
     },

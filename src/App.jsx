@@ -259,6 +259,7 @@ function ClientDetailScreen({
   onDeleteCatalogItem,
   onDeleteClient,
   onSetPaymentMethod,
+  onSetDeliveryFee,
   onAddCredit,
   onAddAddress,
   onEditAddress,
@@ -274,6 +275,7 @@ function ClientDetailScreen({
   const [creditAmount, setCreditAmount] = useState("");
   const [creditNote, setCreditNote] = useState("");
   const [creditAdded, setCreditAdded] = useState(false);
+  const [deliveryFeeInput, setDeliveryFeeInput] = useState(String(client.deliveryFee || 0));
 
   const submitCredit = async () => {
     const amount = toNumber(creditAmount);
@@ -350,6 +352,29 @@ function ClientDetailScreen({
             }`}
           >
             Carta
+          </button>
+        </div>
+      </div>
+
+      <div className="border border-gray-200 rounded-2xl p-4 mb-6">
+        <div className="text-sm font-bold text-gray-900 mb-2">Costo di consegna</div>
+        <p className="text-xs text-gray-400 mb-3">
+          Se maggiore di zero, viene aggiunto automaticamente al totale di ogni nuovo ordine di questo cliente.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="0"
+            value={deliveryFeeInput}
+            onChange={(e) => setDeliveryFeeInput(e.target.value)}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <button
+            onClick={() => onSetDeliveryFee(client.id, toNumber(deliveryFeeInput))}
+            className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-semibold text-gray-800"
+          >
+            Salva
           </button>
         </div>
       </div>
@@ -1106,6 +1131,12 @@ function OrderDetailAdminScreen({
         </div>
       )}
 
+      {order.deliveryFee > 0 && (
+        <div className="text-xs text-gray-400 -mt-3 mb-5">
+          Include un costo di consegna di €{order.deliveryFee.toFixed(2)}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <StatusDot status={order.status} />
         {urgent && (
@@ -1858,20 +1889,28 @@ function AdminNewOrderScreen({ clients, catalog, returns, addresses, onAddAddres
       <div className="px-6 pb-6 pt-2 border-t border-gray-100">
         <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
           <span>{itemCount} capi selezionati</span>
-          <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
+          <span className="text-gray-900">€{total.toFixed(2)}</span>
         </div>
-        {selectedReturnIds.length > 0 && (
-          <>
-            <div className="flex items-center justify-between mb-1 text-sm text-emerald-700">
-              <span>Credito applicato</span>
-              <span className="font-semibold">-€{Math.min(total, selectedReturnsTotal).toFixed(2)}</span>
-            </div>
-            <div className="flex items-center justify-between mb-3 text-sm font-bold text-gray-900">
-              <span>Totale finale</span>
-              <span>€{Math.max(0, total - selectedReturnsTotal).toFixed(2)}</span>
-            </div>
-          </>
+        {client.deliveryFee > 0 && (
+          <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
+            <span>Costo di consegna</span>
+            <span className="text-gray-900">€{client.deliveryFee.toFixed(2)}</span>
+          </div>
         )}
+        {selectedReturnIds.length > 0 && (
+          <div className="flex items-center justify-between mb-1 text-sm text-emerald-700">
+            <span>Credito applicato</span>
+            <span className="font-semibold">
+              -€{Math.min(total + (client.deliveryFee || 0), selectedReturnsTotal).toFixed(2)}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center justify-between mb-3 text-sm font-bold text-gray-900">
+          <span>Totale finale</span>
+          <span>
+            €{Math.max(0, total + (client.deliveryFee || 0) - selectedReturnsTotal).toFixed(2)}
+          </span>
+        </div>
         {submitError && (
           <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-2">
             {submitError}
@@ -1899,6 +1938,7 @@ function AdminNewOrderScreen({ clients, catalog, returns, addresses, onAddAddres
               paymentMethod: client.paymentMethod,
               returnIds: selectedReturnIds,
               address: clientAddresses.find((a) => a.id === selectedAddressId) || null,
+              deliveryFee: client.deliveryFee || 0,
             });
             setSubmitting(false);
             if (res && res.ok === false) {
@@ -2900,6 +2940,7 @@ function LavanderiaView({ data, actions }) {
           setClientDetailId(null);
         }}
         onSetPaymentMethod={actions.setClientPaymentMethod}
+        onSetDeliveryFee={actions.setClientDeliveryFee}
         onAddAddress={actions.createAddress}
         onEditAddress={actions.updateAddress}
         onDeleteAddress={actions.deleteAddress}
@@ -3274,11 +3315,24 @@ function NewOrderScreen({ client, catalog, lastOrder, addresses, onAddAddress, o
       <div className="px-6 pb-6 pt-2 border-t border-gray-100">
         <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
           <span>{itemCount} capi selezionati</span>
-          <span className="font-bold text-gray-900 text-base">€{total.toFixed(2)}</span>
+          <span className="text-gray-900">€{total.toFixed(2)}</span>
+        </div>
+        {client.deliveryFee > 0 && (
+          <div className="flex items-center justify-between mb-1 text-sm text-gray-600">
+            <span>Costo di consegna</span>
+            <span className="text-gray-900">€{client.deliveryFee.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between mb-1 text-sm">
+          <span className="font-bold text-gray-900">Totale</span>
+          <span className="font-bold text-gray-900 text-base">
+            €{(total + (client.deliveryFee || 0)).toFixed(2)}
+          </span>
         </div>
         {client.paymentMethod === "carta" && (
           <div className="text-xs text-gray-400 text-right mb-2">
-            IVA 22%: €{(total * 0.22).toFixed(2)} — Totale con IVA: €{(total * 1.22).toFixed(2)}
+            IVA 22%: €{((total + (client.deliveryFee || 0)) * 0.22).toFixed(2)} — Totale con IVA: €
+            {((total + (client.deliveryFee || 0)) * 1.22).toFixed(2)}
           </div>
         )}
         {submitError && (
@@ -3307,6 +3361,7 @@ function NewOrderScreen({ client, catalog, lastOrder, addresses, onAddAddress, o
               preferredSlots: validSlots,
               note: note.trim(),
               address: addresses.find((a) => a.id === selectedAddressId) || null,
+              deliveryFee: client.deliveryFee || 0,
               returns: returnItemsToSend.map((it) => ({
                 orderId: lastOrder.id,
                 itemName: it.name,
@@ -3418,6 +3473,11 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
       )}
       {order.addressLabel && (
         <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
+      )}
+      {order.deliveryFee > 0 && (
+        <div className="text-xs text-gray-400 mt-0.5">
+          Include consegna: €{order.deliveryFee.toFixed(2)}
+        </div>
       )}
       {order.paymentMethod === "carta" && (
         <div className="text-xs text-gray-400 text-right -mt-1 mb-1">
@@ -4948,6 +5008,11 @@ export default function App() {
     },
     setClientPaymentMethod: async (clientId, method) => {
       const res = await api.setClientPaymentMethod(clientId, method);
+      await refresh();
+      return res;
+    },
+    setClientDeliveryFee: async (clientId, fee) => {
+      const res = await api.setClientDeliveryFee(clientId, fee);
       await refresh();
       return res;
     },

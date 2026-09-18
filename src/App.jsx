@@ -277,6 +277,28 @@ function ClientDetailScreen({
   const [creditAdded, setCreditAdded] = useState(false);
   const [deliveryFeeInput, setDeliveryFeeInput] = useState(String(client.deliveryFee || 0));
   const [deliveryEnabled, setDeliveryEnabled] = useState(!!client.deliveryEnabled);
+  const [deliverySaving, setDeliverySaving] = useState(false);
+  const [deliveryError, setDeliveryError] = useState("");
+  const [deliverySaved, setDeliverySaved] = useState(false);
+
+  useEffect(() => {
+    setDeliveryEnabled(!!client.deliveryEnabled);
+    setDeliveryFeeInput(String(client.deliveryFee || 0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.deliveryEnabled, client.deliveryFee]);
+
+  const saveDelivery = async (enabled, fee) => {
+    setDeliveryError("");
+    setDeliverySaved(false);
+    setDeliverySaving(true);
+    const res = await onSetDelivery(client.id, enabled, fee);
+    setDeliverySaving(false);
+    if (res && res.ok === false) {
+      setDeliveryError(res.error || "Non è stato possibile salvare.");
+    } else {
+      setDeliverySaved(true);
+    }
+  };
 
   const submitCredit = async () => {
     const amount = toNumber(creditAmount);
@@ -363,21 +385,33 @@ function ClientDetailScreen({
           Se "Sì", il costo indicato viene aggiunto automaticamente al totale di ogni nuovo ordine di questo
           cliente. Cambiarlo non modifica gli ordini già creati.
         </p>
+        {deliveryError && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-600 text-sm rounded-xl px-3 py-2 mb-3">
+            {deliveryError}
+          </div>
+        )}
+        {deliverySaved && !deliveryError && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">
+            ✔ Consegna salvata
+          </div>
+        )}
         <div className="flex gap-2 mb-3">
           <button
+            disabled={deliverySaving}
             onClick={() => {
               setDeliveryEnabled(false);
-              onSetDelivery(client.id, false, toNumber(deliveryFeeInput));
+              saveDelivery(false, toNumber(deliveryFeeInput));
             }}
-            className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            className={`flex-1 rounded-lg py-2 text-sm font-semibold border disabled:opacity-50 ${
               !deliveryEnabled ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
             }`}
           >
             No
           </button>
           <button
+            disabled={deliverySaving}
             onClick={() => setDeliveryEnabled(true)}
-            className={`flex-1 rounded-lg py-2 text-sm font-semibold border ${
+            className={`flex-1 rounded-lg py-2 text-sm font-semibold border disabled:opacity-50 ${
               deliveryEnabled ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
             }`}
           >
@@ -391,14 +425,18 @@ function ClientDetailScreen({
               inputMode="decimal"
               placeholder="0"
               value={deliveryFeeInput}
-              onChange={(e) => setDeliveryFeeInput(e.target.value)}
+              onChange={(e) => {
+                setDeliveryFeeInput(e.target.value);
+                setDeliverySaved(false);
+              }}
               className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <button
-              onClick={() => onSetDelivery(client.id, true, toNumber(deliveryFeeInput))}
-              className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-semibold text-gray-800"
+              disabled={deliverySaving}
+              onClick={() => saveDelivery(true, toNumber(deliveryFeeInput))}
+              className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-semibold text-gray-800 disabled:opacity-50"
             >
-              Salva
+              {deliverySaving ? "Salvataggio..." : "Salva"}
             </button>
           </div>
         )}

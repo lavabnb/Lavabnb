@@ -213,6 +213,7 @@ export async function fetchAll() {
     addressFloor: o.address_floor || "",
     addressUnit: o.address_unit || "",
     addressNotes: o.address_notes || "",
+    scheduleNoticeDismissed: o.schedule_notice_dismissed || "",
     total: Number(o.total),
     items: (o.order_items || []).map((it) => ({
       itemId: it.item_id,
@@ -1009,6 +1010,106 @@ export async function updateOrderAddress(orderId, fields) {
   } catch (e) {
     console.error("updateOrderAddress error:", e);
     return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+// ---------------- Modifica data/orario richiesti (cliente) ----------------
+// Stessa regola dell'indirizzo: consentito solo finché la consegna non è programmata.
+export async function updateOrderSlots(orderId, slots) {
+  try {
+    const clean = (slots || [])
+      .filter((s) => s && s.date && s.time)
+      .map((s) => ({ date: s.date, time: s.time.slice(0, 5) }));
+    if (clean.length === 0) return { ok: false, error: "Indica almeno una fascia oraria." };
+
+    const { data: rows, error: readErr } = await neon
+      .from("orders")
+      .select("id, client_id, status")
+      .eq("id", orderId);
+    if (readErr) return { ok: false, error: "Non ho potuto leggere l'ordine: " + readErr.message };
+    const current = rows && rows[0];
+    if (!current) return { ok: false, error: "Ordine non trovato." };
+    if (!ADDRESS_EDITABLE_STATUSES.includes(current.status)) {
+      return { ok: false, error: "La consegna è già stata programmata dalla lavanderia." };
+    }
+
+    const { data: oldRows, error: slotsErr } = await neon
+      .from("order_slots")
+      .select("slot_date, slot_time")
+      .eq("order_id", orderId);
+    if (slotsErr) return { ok: false, error: "Non ho potuto leggere gli orari: " + slotsErr.message };
+    const old = (oldRows || []).map((r) => ({
+      date: r.slot_date,
+      time: r.slot_time ? r.slot_time.slice(0, 5) : "",
+    }));
+    const key = (s) => `${s.date}|${s.time}`;
+    const oldKeys = new Set(old.map(key));
+    const newKeys = new Set(clean.map(key));
+    const toAdd = clean.filter((s) => !oldKeys.has(key(s)));
+    const toRemove = old.filter((s) => !newKeys.has(key(s)));
+
+    // Prima aggiungo le nuove fasce: se qualcosa va storto, quelle vecchie restano intatte.
+    if (toAdd.length > 0) {
+      const { error } = await neon
+        .from("order_slots")
+        .insert(toAdd.map((s) => ({ order_id: orderId, slot_date: s.date, slot_time: s.time })));
+      if (error) return { ok: false, error: "Non ho potuto salvare i nuovi orari: " + error.message };
+    }
+    for (const s of toRemove) {
+      const { data, error } = await neon
+        .from("order_slots")
+        .delete()
+        .eq("order_id", orderId)
+        .eq("slot_date", s.date)
+        .eq("slot_time", s.time)
+        .select("order_id");
+      if (error || !data || data.length === 0) {
+        return {
+          ok: false,
+          error:
+            "I nuovi orari sono stati aggiunti ma non ho potuto rimuovere quelli vecchi" +
+            (error ? ": " + error.message : " (permessi mancanti).") +
+            " Riprova o scrivi alla lavanderia.",
+        };
+      }
+    }
+
+    if (toAdd.length > 0 || toRemove.length > 0) {
+      const list = clean.map((s) => `${formatIT(s.date)} ${s.time}`).join(" / ");
+      const { error: msgErr } = await neon
+        .from("order_messages")
+        .insert([{ order_id: orderId, sender: "client", message: `🕒 Ho modificato data e orario di consegna: ${list}` }]);
+      if (msgErr) console.error("updateOrderSlots message error:", msgErr);
+      await addNotification(
+        current.client_id,
+        `Il cliente ha modificato data e orario richiesti per l'ordine #${orderId}: ${list}`,
+        "staff"
+      );
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("updateOrderSlots error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
+// Il cliente chiude l'avviso di variazione: lo ricordo sull'ordine (vale su ogni dispositivo)
+export async function dismissScheduleNotice(orderId, key) {
+  try {
+    const { data, error } = await neon
+      .from("orders")
+      .update({ schedule_notice_dismissed: key })
+      .eq("id", orderId)
+      .select("id");
+    if (error) {
+      console.error("dismissScheduleNotice error:", error);
+      return { ok: false, error: error.message };
+    }
+    if (!data || data.length === 0) return { ok: false, error: "Nessuna riga aggiornata." };
+    return { ok: true };
+  } catch (e) {
+    console.error("dismissScheduleNotice error:", e);
+    return { ok: false, error: e.message || String(e) };
   }
 }
 

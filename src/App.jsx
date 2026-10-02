@@ -54,6 +54,30 @@ const ADDRESS_EDITABLE_STATUSES = ["nuovo", "pronto"];
 function canClientEditAddress(order) {
   return ADDRESS_EDITABLE_STATUSES.includes(order.status);
 }
+// Confronta la consegna programmata con le fasce richieste dal cliente.
+// Una fascia "15:00" vale dalle 15:00 alle 16:00: un orario dentro la fascia è considerato uguale.
+function timeToMin(t) {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+function scheduleChange(slots, date, time) {
+  if (!slots || slots.length === 0 || !date) return null;
+  const t = timeToMin(time);
+  const inBand = (s) => {
+    const start = timeToMin(s.time);
+    return t !== null && start !== null && t >= start && t < start + 60;
+  };
+  if (slots.some((s) => s.date === date && inBand(s))) return null;
+  const dateOk = slots.some((s) => s.date === date);
+  const timeOk = slots.some((s) => inBand(s));
+  if (dateOk) return "orario";
+  if (timeOk) return "data";
+  return "data e orario";
+}
+function weekdayIT(iso) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long" });
+}
 function toNumber(str) {
   if (typeof str !== "string") return Number(str) || 0;
   const n = parseFloat(str.replace(",", "."));
@@ -752,6 +776,16 @@ function ScheduleForm({ order, onConfirm, onCancel }) {
           className="w-28 border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
         />
       </div>
+      {scheduleChange(order.preferredSlots, date, time) && (
+        <div className="mb-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg p-2">
+          ⚠️ {scheduleChange(order.preferredSlots, date, time) === "data e orario"
+            ? "Data e orario diversi"
+            : scheduleChange(order.preferredSlots, date, time) === "data"
+            ? "Data diversa"
+            : "Orario diverso"}{" "}
+          da quanto richiesto dal cliente: il cliente riceverà un avviso con la modifica.
+        </div>
+      )}
       <div className="flex gap-2">
         <button
           onClick={() => onConfirm(order.id, date, time)}
@@ -883,6 +917,7 @@ function MarkReadyButton({ orderId, onMarkReady, className }) {
 
 function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
   const [scheduling, setScheduling] = useState(false);
+  const [showItems, setShowItems] = useState(false);
   const urgent = isUrgentOrder(order);
   const deliverySoon = isDeliverySoon(order);
   const clientMsg = hasClientMessage(order);
@@ -921,8 +956,24 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
         </button>
       </div>
       <DeliveryHighlight order={order} total={order.total} className="mt-3" />
-      <div className="mt-3 text-xs text-gray-500">
-        {order.items.map((it) => `${it.qty}× ${it.name}`).join(" · ")}
+      <div className="mt-3 border border-gray-100 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowItems((v) => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-600"
+        >
+          <span>{order.items.reduce((sum, it) => sum + it.qty, 0)} capi ordinati</span>
+          <ChevronDown size={14} className={`transition-transform ${showItems ? "rotate-180" : ""}`} />
+        </button>
+        {showItems && (
+          <div className="px-3 pb-2 divide-y divide-gray-50">
+            {order.items.map((it) => (
+              <div key={it.itemId} className="flex items-center justify-between py-1.5 text-sm">
+                <span className="text-gray-700">{it.name}</span>
+                <span className="font-semibold text-gray-900">×{it.qty}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {order.status !== "programmato" && order.preferredSlots && order.preferredSlots.length > 0 && (
         <div className="mt-2 text-xs text-gray-400">
@@ -961,10 +1012,7 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
         ))}
 
       {order.status === "programmato" && (
-        <div className="mt-3 flex items-center justify-between gap-2 bg-gray-50 rounded-xl p-3">
-          <span className="text-sm text-gray-600">
-            Consegna: {formatIT(order.deliveryDate)} alle {order.deliveryTime}
-          </span>
+        <div className="mt-3 flex justify-end">
           <ConfirmDeliverButton orderId={order.id} onConfirm={onMarkDelivered} />
         </div>
       )}
@@ -3779,6 +3827,40 @@ function ClientOrderAddressSection({ order, addresses, onUpdateAddress }) {
   );
 }
 
+function ScheduleChangeNotice({ order }) {
+  if (order.status !== "programmato" || !order.deliveryDate) return null;
+  const change = scheduleChange(order.preferredSlots, order.deliveryDate, order.deliveryTime);
+  if (!change) return null;
+  const dateChanged = change !== "orario";
+  const timeChanged = change !== "data";
+  const title =
+    change === "data e orario"
+      ? "La lavanderia ha modificato data e orario di consegna"
+      : change === "data"
+      ? "La lavanderia ha modificato la data di consegna"
+      : "La lavanderia ha modificato l'orario di consegna";
+  return (
+    <div className="mt-3 bg-amber-50 border border-amber-300 rounded-xl p-3">
+      <div className="text-sm font-bold text-amber-800">⚠️ {title}</div>
+      <div className="mt-1 text-sm text-amber-900">
+        {dateChanged ? "Nuovo giorno" : "Giorno"}:{" "}
+        <b className={dateChanged ? "underline" : ""}>
+          {weekdayIT(order.deliveryDate)} {formatIT(order.deliveryDate)}
+        </b>
+      </div>
+      <div className="text-sm text-amber-900">
+        {timeChanged ? "Nuovo orario" : "Orario"}:{" "}
+        <b className={timeChanged ? "underline" : ""}>{order.deliveryTime}</b>
+      </div>
+      <div className="mt-1 text-xs text-amber-700">
+        Avevi richiesto:{" "}
+        {order.preferredSlots.map((s) => `${formatIT(s.date)} ${formatSlotTime(s.time)}`).join(" / ")}
+        {". Se non va bene, scrivi alla lavanderia nei messaggi di questo ordine."}
+      </div>
+    </div>
+  );
+}
+
 function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAddress }) {
   const [showChat, setShowChat] = useState(false);
   const [showItems, setShowItems] = useState(false);
@@ -3870,6 +3952,8 @@ function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAd
           ✏️ Ordine modificato dalla lavanderia: {order.lastModification}
         </div>
       )}
+
+      <ScheduleChangeNotice order={order} />
 
       <div className="mt-3">
         <StatusDot status={order.status} forClient />

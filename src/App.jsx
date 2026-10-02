@@ -804,6 +804,83 @@ function ConfirmDeliverButton({ orderId, onConfirm, className }) {
   );
 }
 
+// ---------- Ordini lavanderia: consegna in evidenza ----------
+function deliveryInfo(order) {
+  if ((order.status === "programmato" || order.status === "consegnato") && order.deliveryDate) {
+    return {
+      label: order.status === "consegnato" ? "Consegnato il" : "Consegna programmata",
+      date: formatIT(order.deliveryDate),
+      time: order.deliveryTime || "",
+      extra: "",
+    };
+  }
+  const slots = [...(order.preferredSlots || [])].sort((a, b) =>
+    `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`)
+  );
+  if (slots.length > 0) {
+    return {
+      label: "Consegna richiesta",
+      date: formatIT(slots[0].date),
+      time: formatSlotTime(slots[0].time),
+      extra: slots.length > 1 ? `+${slots.length - 1} ${slots.length === 2 ? "altra fascia" : "altre fasce"}` : "",
+    };
+  }
+  return { label: "Consegna", date: "Da programmare", time: "", extra: "" };
+}
+
+function DeliveryHighlight({ order, total, className = "" }) {
+  const info = deliveryInfo(order);
+  return (
+    <div className={`flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2.5 ${className}`}>
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold text-gray-400 uppercase">{info.label}</div>
+        <div className="text-base font-bold text-gray-900">
+          📅 {info.date}
+          {info.time && <span> • {info.time}</span>}
+        </div>
+        {info.extra && <div className="text-[11px] text-gray-400">{info.extra}</div>}
+      </div>
+      <div className="text-right shrink-0">
+        <div className="text-[11px] font-bold text-gray-400 uppercase">Totale</div>
+        <div className="text-base font-bold text-gray-900">€{Number(total || 0).toFixed(2)}</div>
+      </div>
+    </div>
+  );
+}
+
+function CreatedDateFooter({ order, className = "" }) {
+  if (!order.createdDate) return null;
+  return (
+    <div className={`text-[11px] text-gray-400 ${className}`}>
+      Ordine creato il {formatIT(order.createdDate)}
+    </div>
+  );
+}
+
+// Pulsante "Segna come pronto" con stato di salvataggio ed eventuale errore visibile
+function MarkReadyButton({ orderId, onMarkReady, className }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setError("");
+          setBusy(true);
+          const res = await onMarkReady(orderId);
+          setBusy(false);
+          if (res && res.ok === false) setError(res.error || "Non è stato possibile aggiornare l'ordine.");
+        }}
+        className={className}
+      >
+        {busy ? "Salvataggio..." : "Segna come pronto"}
+      </button>
+      {error && <div className="text-xs text-rose-600 mt-1">{error}</div>}
+    </div>
+  );
+}
+
 function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
   const [scheduling, setScheduling] = useState(false);
   const urgent = isUrgentOrder(order);
@@ -835,9 +912,6 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
           {order.addressLabel && (
             <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
           )}
-          <div className="text-sm text-gray-500 mt-0.5">
-            {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
-          </div>
         </div>
         <button
           onClick={() => onOpenDetail(order.id)}
@@ -846,6 +920,7 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
           Dettagli
         </button>
       </div>
+      <DeliveryHighlight order={order} total={order.total} className="mt-3" />
       <div className="mt-3 text-xs text-gray-500">
         {order.items.map((it) => `${it.qty}× ${it.name}`).join(" · ")}
       </div>
@@ -859,12 +934,11 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
       </div>
 
       {order.status === "nuovo" && (
-        <button
-          onClick={() => onMarkReady(order.id)}
-          className="mt-3 border border-gray-300 rounded-lg px-4 py-1.5 text-sm font-semibold text-gray-800"
-        >
-          Segna come pronto
-        </button>
+        <MarkReadyButton
+          orderId={order.id}
+          onMarkReady={onMarkReady}
+          className="mt-3 border border-gray-300 rounded-lg px-4 py-1.5 text-sm font-semibold text-gray-800 disabled:opacity-50"
+        />
       )}
 
       {order.status === "pronto" &&
@@ -894,6 +968,7 @@ function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDel
           <ConfirmDeliverButton orderId={order.id} onConfirm={onMarkDelivered} />
         </div>
       )}
+      <CreatedDateFooter order={order} className="mt-3 pt-2 border-t border-gray-100" />
     </div>
   );
 }
@@ -1224,15 +1299,9 @@ function OrderDetailAdminScreen({
             URGENTE
           </span>
         )}
-        <span className="text-sm text-gray-400">Creato il {formatIT(order.createdDate)}</span>
       </div>
 
-      {order.status !== "nuovo" && order.deliveryDate && (
-        <div className="border border-gray-200 rounded-xl px-4 py-3 mb-5 text-sm text-gray-700">
-          Consegna {order.status === "consegnato" ? "effettuata" : "programmata"} il{" "}
-          <b>{formatIT(order.deliveryDate)}</b> alle <b>{order.deliveryTime}</b>
-        </div>
-      )}
+      <DeliveryHighlight order={order} total={order.total} className="mb-5" />
 
       {order.preferredSlots && order.preferredSlots.length > 0 && (
         <div className="-mt-3 mb-5">
@@ -1505,12 +1574,13 @@ function OrderDetailAdminScreen({
       <div className="mt-6" />
 
       {order.status === "nuovo" && (
-        <button
-          onClick={() => onMarkReady(order.id)}
-          className="w-full border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-800 mb-3"
-        >
-          Segna come pronto
-        </button>
+        <div className="mb-3">
+          <MarkReadyButton
+            orderId={order.id}
+            onMarkReady={onMarkReady}
+            className="w-full border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-800 disabled:opacity-50"
+          />
+        </div>
       )}
 
       {order.status === "programmato" && (
@@ -1560,6 +1630,7 @@ function OrderDetailAdminScreen({
           </div>
         </div>
       )}
+      <CreatedDateFooter order={order} className="mt-6 text-center" />
     </div>
   );
 }
@@ -5340,8 +5411,9 @@ export default function App() {
       await refresh();
     },
     markReady: async (orderId) => {
-      await api.markReady(orderId);
+      const res = await api.markReady(orderId);
       await refresh();
+      return res;
     },
     markDelivered: async (orderId) => {
       await api.markDelivered(orderId);

@@ -75,6 +75,17 @@ function scheduleChange(slots, date, time) {
   if (timeOk) return "data";
   return "data e orario";
 }
+// Fasce orarie selezionabili dal cliente (stesse del Nuovo Ordine)
+const CLIENT_HOUR_SLOTS = ["09:00", "10:00", "11:00", "12:00", "13:00"];
+// Chiave che identifica la programmazione attuale: se la lavanderia riprogramma, l'avviso ricompare
+function scheduleNoticeKey(order) {
+  return `${order.deliveryDate || ""}|${order.deliveryTime || ""}`;
+}
+function needsScheduleNotice(order) {
+  if (order.status !== "programmato" || !order.deliveryDate) return false;
+  if (!scheduleChange(order.preferredSlots, order.deliveryDate, order.deliveryTime)) return false;
+  return order.scheduleNoticeDismissed !== scheduleNoticeKey(order);
+}
 function weekdayIT(iso) {
   return new Date(iso + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long" });
 }
@@ -882,6 +893,27 @@ function DeliveryHighlight({ order, total, className = "" }) {
   );
 }
 
+// Riga compatta per le liste ordini: solo data di consegna e struttura. Tocca per aprire i dettagli.
+function OrderCompactRow({ order, fallbackName, onOpen, borderClass = "border-gray-200" }) {
+  const info = deliveryInfo(order);
+  return (
+    <button
+      onClick={() => onOpen(order.id)}
+      className={`w-full text-left border rounded-2xl px-4 py-3 mb-3 flex items-center justify-between gap-3 ${borderClass}`}
+    >
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold text-gray-400 uppercase">{info.label}</div>
+        <div className="text-base font-bold text-gray-900">
+          📅 {info.date}
+          {info.time && <span> • {info.time}</span>}
+        </div>
+        <div className="text-sm text-gray-600 truncate">📍 {order.addressLabel || fallbackName || "—"}</div>
+      </div>
+      <ChevronDown size={18} className="text-gray-400 -rotate-90 shrink-0" />
+    </button>
+  );
+}
+
 function CreatedDateFooter({ order, className = "" }) {
   if (!order.createdDate) return null;
   return (
@@ -915,109 +947,15 @@ function MarkReadyButton({ orderId, onMarkReady, className }) {
   );
 }
 
-function OrderRecentCard({ order, clientName, onMarkReady, onSchedule, onMarkDelivered, onOpenDetail }) {
-  const [scheduling, setScheduling] = useState(false);
-  const [showItems, setShowItems] = useState(false);
-  const urgent = isUrgentOrder(order);
-  const deliverySoon = isDeliverySoon(order);
-  const clientMsg = hasClientMessage(order);
+function OrderRecentCard({ order, clientName, onOpenDetail }) {
+  // Vista compatta: data di consegna + struttura. Tutte le azioni sono nei dettagli.
+  const border = hasClientMessage(order)
+    ? "border-blue-300 bg-blue-50/30"
+    : isUrgentOrder(order)
+    ? "border-rose-300"
+    : "border-gray-200";
   return (
-    <div className={`border rounded-2xl p-5 mb-4 ${clientMsg ? "border-blue-300 bg-blue-50/30" : "border-gray-200"}`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-gray-900">#{order.id}</span>
-            {urgent && (
-              <span className="bg-rose-600 text-white text-[11px] font-bold px-2 py-1 rounded-full">
-                URGENTE
-              </span>
-            )}
-            {deliverySoon && (
-              <span className="bg-blue-50 text-blue-600 text-[11px] font-bold px-2 py-1 rounded-full">
-                CONSEGNA ENTRO 72H
-              </span>
-            )}
-            {clientMsg && (
-              <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-1 rounded-full flex items-center gap-1">
-                <MessageSquare size={11} /> NUOVO MESSAGGIO
-              </span>
-            )}
-          </div>
-          <div className="text-sm text-gray-500 mt-0.5">{clientName}</div>
-          {order.addressLabel && (
-            <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
-          )}
-        </div>
-        <button
-          onClick={() => onOpenDetail(order.id)}
-          className="border border-gray-300 rounded-lg px-4 py-1.5 text-sm font-semibold text-gray-800 shrink-0"
-        >
-          Dettagli
-        </button>
-      </div>
-      <DeliveryHighlight order={order} total={order.total} className="mt-3" />
-      <div className="mt-3 border border-gray-100 rounded-xl overflow-hidden">
-        <button
-          onClick={() => setShowItems((v) => !v)}
-          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-600"
-        >
-          <span>{order.items.reduce((sum, it) => sum + it.qty, 0)} capi ordinati</span>
-          <ChevronDown size={14} className={`transition-transform ${showItems ? "rotate-180" : ""}`} />
-        </button>
-        {showItems && (
-          <div className="px-3 pb-2 divide-y divide-gray-50">
-            {order.items.map((it) => (
-              <div key={it.itemId} className="flex items-center justify-between py-1.5 text-sm">
-                <span className="text-gray-700">{it.name}</span>
-                <span className="font-semibold text-gray-900">×{it.qty}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      {order.status !== "programmato" && order.preferredSlots && order.preferredSlots.length > 0 && (
-        <div className="mt-2 text-xs text-gray-400">
-          Orari richiesti: {order.preferredSlots.map((s) => `${formatIT(s.date)} ${s.time}`).join(" / ")}
-        </div>
-      )}
-      <div className="mt-3">
-        <StatusDot status={order.status} />
-      </div>
-
-      {order.status === "nuovo" && (
-        <MarkReadyButton
-          orderId={order.id}
-          onMarkReady={onMarkReady}
-          className="mt-3 border border-gray-300 rounded-lg px-4 py-1.5 text-sm font-semibold text-gray-800 disabled:opacity-50"
-        />
-      )}
-
-      {order.status === "pronto" &&
-        (!scheduling ? (
-          <button
-            onClick={() => setScheduling(true)}
-            className="mt-3 border border-gray-300 rounded-lg px-4 py-1.5 text-sm font-semibold text-gray-800"
-          >
-            Programma consegna
-          </button>
-        ) : (
-          <ScheduleForm
-            order={order}
-            onConfirm={(id, date, time) => {
-              onSchedule(id, date, time);
-              setScheduling(false);
-            }}
-            onCancel={() => setScheduling(false)}
-          />
-        ))}
-
-      {order.status === "programmato" && (
-        <div className="mt-3 flex justify-end">
-          <ConfirmDeliverButton orderId={order.id} onConfirm={onMarkDelivered} />
-        </div>
-      )}
-      <CreatedDateFooter order={order} className="mt-3 pt-2 border-t border-gray-100" />
-    </div>
+    <OrderCompactRow order={order} fallbackName={clientName} onOpen={onOpenDetail} borderClass={border} />
   );
 }
 
@@ -1246,6 +1184,8 @@ function OrderDetailAdminScreen({
   onUpdateItems,
   onSetNote,
   onMarkReady,
+  onSchedule,
+  onMarkDelivered,
   onUnschedule,
   onDelete,
   onSendMessage,
@@ -1255,6 +1195,7 @@ function OrderDetailAdminScreen({
   onConfirmPayment,
 }) {
   const [noteDraft, setNoteDraft] = useState(order.note || "");
+  const [scheduling, setScheduling] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -1627,6 +1568,38 @@ function OrderDetailAdminScreen({
             orderId={order.id}
             onMarkReady={onMarkReady}
             className="w-full border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-800 disabled:opacity-50"
+          />
+        </div>
+      )}
+
+      {order.status === "pronto" && onSchedule && (
+        <div className="mb-3">
+          {!scheduling ? (
+            <button
+              onClick={() => setScheduling(true)}
+              className="w-full border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-800"
+            >
+              Programma consegna
+            </button>
+          ) : (
+            <ScheduleForm
+              order={order}
+              onConfirm={(id, date, time) => {
+                onSchedule(id, date, time);
+                setScheduling(false);
+              }}
+              onCancel={() => setScheduling(false)}
+            />
+          )}
+        </div>
+      )}
+
+      {order.status === "programmato" && onMarkDelivered && (
+        <div className="mb-3 flex justify-center">
+          <ConfirmDeliverButton
+            orderId={order.id}
+            onConfirm={onMarkDelivered}
+            className="w-full border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-800 flex items-center justify-center gap-1"
           />
         </div>
       )}
@@ -3100,6 +3073,8 @@ function LavanderiaView({ data, actions }) {
             onUpdateItems={actions.updateOrderItems}
             onSetNote={actions.setOrderNote}
             onMarkReady={(id) => actions.markReady(id)}
+            onSchedule={actions.scheduleOrder}
+            onMarkDelivered={actions.markDelivered}
             onUnschedule={(id) => {
               actions.unscheduleOrder(id);
               setDetailOrderId(null);
@@ -3408,7 +3383,7 @@ function NewOrderScreen({ client, catalog, lastOrder, addresses, onAddAddress, o
           <div className="font-bold text-gray-900 mb-1">Quando preferisci la consegna?</div>
           <p className="text-xs text-gray-400 mb-3">
             Indica una o più fasce orarie possibili (9:00–14:00), con almeno 24 ore di anticipo. La
-            lavanderia sceglierà quella più adatta e non sarà modificabile dopo la conferma.
+            lavanderia sceglierà quella più adatta: potrai modificarla finché la consegna non viene programmata.
           </p>
           {slots.map((s, i) => {
             const valid = isSlotValid(s.date, s.time);
@@ -3739,7 +3714,6 @@ function ClientOrderAddressSection({ order, addresses, onUpdateAddress }) {
   const [prefill, setPrefill] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const editable = canClientEditAddress(order);
-  const isConsegnato = order.status === "consegnato";
 
   const currentAsInitial = {
     label: order.addressLabel,
@@ -3775,12 +3749,6 @@ function ClientOrderAddressSection({ order, addresses, onUpdateAddress }) {
             >
               ✏️ Modifica indirizzo
             </button>
-          )}
-          {!editable && !isConsegnato && (
-            <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">
-              La consegna è già stata programmata, quindi l'indirizzo non è più modificabile
-              dall'app. Se c'è un errore, scrivi alla lavanderia nei messaggi di questo ordine.
-            </div>
           )}
         </>
       ) : (
@@ -3827,10 +3795,150 @@ function ClientOrderAddressSection({ order, addresses, onUpdateAddress }) {
   );
 }
 
-function ScheduleChangeNotice({ order }) {
-  if (order.status !== "programmato" || !order.deliveryDate) return null;
+function ClientOrderSlotsSection({ order, onUpdateSlots }) {
+  const [editing, setEditing] = useState(false);
+  const [slots, setSlots] = useState([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [success, setSuccess] = useState("");
+  const editable = canClientEditAddress(order); // stessa regola dell'indirizzo
+  const current = order.preferredSlots || [];
+
+  const startEdit = () => {
+    setSuccess("");
+    setError("");
+    setSlots(
+      current.length > 0
+        ? current.map((s) => ({ date: s.date, time: s.time }))
+        : [{ date: addDaysISO(isoToday(), 2), time: "09:00" }]
+    );
+    setEditing(true);
+  };
+  const updateSlot = (i, field, value) =>
+    setSlots((list) => list.map((sl, idx) => (idx === i ? { ...sl, [field]: value } : sl)));
+
+  const save = async () => {
+    setError("");
+    if (slots.length === 0) {
+      setError("Indica almeno una fascia oraria.");
+      return;
+    }
+    if (slots.some((s) => !s.date || !s.time)) {
+      setError("Completa data e orario di ogni fascia.");
+      return;
+    }
+    if (slots.some((s) => !isSlotValid(s.date, s.time))) {
+      setError("Ogni fascia deve essere ad almeno 24 ore da adesso.");
+      return;
+    }
+    const keys = slots.map((s) => `${s.date}|${s.time}`);
+    if (new Set(keys).size !== keys.length) {
+      setError("Hai inserito due volte la stessa fascia.");
+      return;
+    }
+    setBusy(true);
+    const res = await onUpdateSlots(order.id, slots);
+    setBusy(false);
+    if (res && res.ok === false) {
+      setError(res.error || "Non è stato possibile salvare.");
+      return;
+    }
+    setEditing(false);
+    setSuccess("Data e orario di consegna aggiornati correttamente.");
+  };
+
+  if (!editing) {
+    if (current.length === 0 && !editable) return null;
+    return (
+      <div>
+        {success && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs rounded-lg p-2 font-medium">
+            ✅ {success}
+          </div>
+        )}
+        <RequestedSlotsBox order={order} />
+        {editable && onUpdateSlots && (
+          <button
+            onClick={startEdit}
+            className="mt-2 text-xs font-semibold text-gray-700 border border-gray-300 rounded-full px-3 py-1"
+          >
+            ✏️ Modifica data e orario
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 border border-gray-200 rounded-xl px-3 py-2.5">
+      <div className="text-[11px] font-bold text-gray-400 uppercase mb-2">Modifica data e orario</div>
+      {error && <div className="text-xs text-rose-600 mb-2">{error}</div>}
+      {slots.map((s, i) => {
+        const valid = isSlotValid(s.date, s.time);
+        return (
+          <div key={i} className="mb-3">
+            <div className="flex gap-2 items-center mb-2">
+              <input
+                type="date"
+                value={s.date}
+                min={addDaysISO(isoToday(), 1)}
+                onChange={(e) => updateSlot(i, "date", e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+              />
+              {slots.length > 1 && (
+                <button
+                  onClick={() => setSlots((list) => list.filter((_, idx) => idx !== i))}
+                  className="w-9 h-9 border border-gray-300 rounded-lg flex items-center justify-center text-gray-500 shrink-0"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {CLIENT_HOUR_SLOTS.map((h) => (
+                <button
+                  key={h}
+                  onClick={() => updateSlot(i, "time", h)}
+                  className={`text-xs px-3 py-1.5 rounded-full border font-medium ${
+                    s.time === h ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-700"
+                  }`}
+                >
+                  {formatSlotTime(h)}
+                </button>
+              ))}
+            </div>
+            {!valid && <div className="text-xs text-rose-600 mt-1">Serve almeno 24 ore di anticipo da adesso.</div>}
+          </div>
+        );
+      })}
+      <button
+        onClick={() => setSlots((list) => [...list, { date: addDaysISO(isoToday(), 2), time: "09:00" }])}
+        className="text-sm font-semibold text-gray-600 flex items-center gap-1.5 mb-3"
+      >
+        <Plus size={14} /> Aggiungi un'altra fascia oraria
+      </button>
+      <div className="flex gap-2">
+        <button
+          disabled={busy}
+          onClick={save}
+          className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
+        >
+          {busy ? "Salvataggio..." : "Salva data e orario"}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-semibold"
+        >
+          Annulla
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ScheduleChangeNotice({ order, onDismiss, showOrderId = false }) {
+  if (!needsScheduleNotice(order)) return null;
   const change = scheduleChange(order.preferredSlots, order.deliveryDate, order.deliveryTime);
-  if (!change) return null;
   const dateChanged = change !== "orario";
   const timeChanged = change !== "data";
   const title =
@@ -3840,8 +3948,20 @@ function ScheduleChangeNotice({ order }) {
       ? "La lavanderia ha modificato la data di consegna"
       : "La lavanderia ha modificato l'orario di consegna";
   return (
-    <div className="mt-3 bg-amber-50 border border-amber-300 rounded-xl p-3">
-      <div className="text-sm font-bold text-amber-800">⚠️ {title}</div>
+    <div className="mt-3 mb-3 bg-amber-50 border border-amber-300 rounded-xl p-3 relative">
+      {onDismiss && (
+        <button
+          onClick={() => onDismiss(order)}
+          aria-label="Chiudi avviso"
+          className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center text-amber-700 hover:bg-amber-100"
+        >
+          <X size={16} />
+        </button>
+      )}
+      <div className="text-sm font-bold text-amber-800 pr-8">
+        ⚠️ {showOrderId ? `Ordine #${order.id}: ` : ""}
+        {title}
+      </div>
       <div className="mt-1 text-sm text-amber-900">
         {dateChanged ? "Nuovo giorno" : "Giorno"}:{" "}
         <b className={dateChanged ? "underline" : ""}>
@@ -3861,7 +3981,15 @@ function ScheduleChangeNotice({ order }) {
   );
 }
 
-function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAddress }) {
+function ClienteOrderCard({
+  order,
+  onSendMessage,
+  returns,
+  addresses,
+  onUpdateAddress,
+  onUpdateSlots,
+  onDismissNotice,
+}) {
   const [showChat, setShowChat] = useState(false);
   const [showItems, setShowItems] = useState(false);
   const messages = order.messages || [];
@@ -3875,9 +4003,7 @@ function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAd
     <div className="border border-gray-200 rounded-2xl p-5 mb-4">
       <div className="flex items-center justify-between">
         <span className="font-bold text-gray-900">#{order.id}</span>
-        <span className="text-sm text-gray-500">
-          {formatIT(order.createdDate)} • €{order.total.toFixed(2)}
-        </span>
+        <span className="text-sm text-gray-500">€{order.total.toFixed(2)}</span>
       </div>
       {order.createdBy === "lavanderia" && (
         <div className="mt-1 text-[11px] font-bold text-gray-500 flex items-center gap-1">
@@ -3895,7 +4021,7 @@ function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAd
         </div>
       )}
 
-      <RequestedSlotsBox order={order} />
+      <ClientOrderSlotsSection order={order} onUpdateSlots={onUpdateSlots} />
       <ClientOrderAddressSection
         order={order}
         addresses={addresses}
@@ -3953,7 +4079,7 @@ function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAd
         </div>
       )}
 
-      <ScheduleChangeNotice order={order} />
+      <ScheduleChangeNotice order={order} onDismiss={onDismissNotice} />
 
       <div className="mt-3">
         <StatusDot status={order.status} forClient />
@@ -3998,6 +4124,7 @@ function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAd
         ) : (
           <OrderChat order={order} sender="client" onSend={onSendMessage} readOnly={isConsegnato} />
         ))}
+      <CreatedDateFooter order={order} className="mt-4 pt-2 border-t border-gray-100" />
     </div>
   );
 }
@@ -5179,6 +5306,17 @@ function WaitingActivationScreen({ clientName, onLogout }) {
 function ClienteDashboard({ data, client, actions }) {
   const [tab, setTab] = useState("ordini");
   const [subScreen, setSubScreen] = useState("dashboard");
+  const [detailOrderId, setDetailOrderId] = useState(null);
+  // Avvisi chiusi in questa sessione: spariscono subito, il salvataggio nel database li tiene chiusi
+  const [hiddenNotices, setHiddenNotices] = useState({});
+  const dismissNotice = (order) => {
+    const key = scheduleNoticeKey(order);
+    setHiddenNotices((h) => ({ ...h, [order.id]: key }));
+    actions.dismissScheduleNotice(order.id, key);
+  };
+  const withLocalDismiss = (o) =>
+    hiddenNotices[o.id] ? { ...o, scheduleNoticeDismissed: hiddenNotices[o.id] } : o;
+  const myAddresses = (data.addresses || []).filter((a) => a.clientId === client.id);
 
   const myOrders = data.orders
     .filter((o) => o.clientId === client.id)
@@ -5204,6 +5342,41 @@ function ClienteDashboard({ data, client, actions }) {
         <BottomNav items={bottomItems} active={tab} onChange={setTab} />
       </div>
     );
+  }
+
+  if (detailOrderId) {
+    const found = myOrders.find((o) => o.id === detailOrderId);
+    if (found) {
+      const order = withLocalDismiss(found);
+      return (
+        <div className="flex flex-col h-full">
+          <div className="flex-1 overflow-y-auto px-6 pt-5 pb-6">
+            <ScreenHeader
+              title={`Ordine #${order.id}`}
+              subtitle="Dettagli dell'ordine"
+              onBack={() => setDetailOrderId(null)}
+            />
+            <ClienteOrderCard
+              order={order}
+              onSendMessage={actions.sendOrderMessage}
+              returns={data.returns}
+              addresses={myAddresses}
+              onUpdateAddress={actions.updateOrderAddress}
+              onUpdateSlots={actions.updateOrderSlots}
+              onDismissNotice={dismissNotice}
+            />
+          </div>
+          <BottomNav
+            items={bottomItems}
+            active={tab}
+            onChange={(k) => {
+              setDetailOrderId(null);
+              setTab(k);
+            }}
+          />
+        </div>
+      );
+    }
   }
 
   if (subScreen === "newOrder") {
@@ -5269,13 +5442,18 @@ function ClienteDashboard({ data, client, actions }) {
           <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine ancora.</p>
         )}
         {myOrders.map((o) => (
-          <ClienteOrderCard
+          <OrderCompactRow
             key={o.id}
             order={o}
-            onSendMessage={actions.sendOrderMessage}
-            returns={data.returns}
-            addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
-            onUpdateAddress={actions.updateOrderAddress}
+            fallbackName={client.name}
+            onOpen={setDetailOrderId}
+            borderClass={
+              (o.messages || []).length > 0 &&
+              o.status !== "consegnato" &&
+              o.messages[o.messages.length - 1].sender === "staff"
+                ? "border-amber-300 bg-amber-50/40"
+                : "border-gray-200"
+            }
           />
         ))}
       </div>
@@ -5350,19 +5528,28 @@ function ClienteDashboard({ data, client, actions }) {
           </button>
         </div>
 
+        {activeOrders.map(withLocalDismiss).filter(needsScheduleNotice).map((o) => (
+          <ScheduleChangeNotice key={`notice-${o.id}`} order={o} onDismiss={dismissNotice} showOrderId />
+        ))}
+
         {activeOrders.length === 0 && (
           <p className="text-gray-400 text-sm py-8 text-center">
             Nessun ordine ancora. Crea il tuo primo ordine!
           </p>
         )}
         {activeOrders.map((o) => (
-          <ClienteOrderCard
+          <OrderCompactRow
             key={o.id}
             order={o}
-            onSendMessage={actions.sendOrderMessage}
-            returns={data.returns}
-            addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
-            onUpdateAddress={actions.updateOrderAddress}
+            fallbackName={client.name}
+            onOpen={setDetailOrderId}
+            borderClass={
+              (o.messages || []).length > 0 &&
+              o.status !== "consegnato" &&
+              o.messages[o.messages.length - 1].sender === "staff"
+                ? "border-amber-300 bg-amber-50/40"
+                : "border-gray-200"
+            }
           />
         ))}
       </div>
@@ -5543,6 +5730,16 @@ export default function App() {
     },
     createAddress: async (clientId, fields) => {
       const res = await api.createAddress(clientId, fields);
+      await refresh();
+      return res;
+    },
+    updateOrderSlots: async (orderId, slots) => {
+      const res = await api.updateOrderSlots(orderId, slots);
+      await refresh();
+      return res;
+    },
+    dismissScheduleNotice: async (orderId, key) => {
+      const res = await api.dismissScheduleNotice(orderId, key);
       await refresh();
       return res;
     },

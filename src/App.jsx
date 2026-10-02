@@ -880,7 +880,7 @@ function DeliveryHighlight({ order, total, className = "" }) {
       <div className="min-w-0">
         <div className="text-[11px] font-bold text-gray-400 uppercase">{info.label}</div>
         <div className="text-base font-bold text-gray-900">
-          📅 {info.date}
+          {info.date}
           {info.time && <span> • {info.time}</span>}
         </div>
         {info.extra && <div className="text-[11px] text-gray-400">{info.extra}</div>}
@@ -893,6 +893,20 @@ function DeliveryHighlight({ order, total, className = "" }) {
   );
 }
 
+// Colore del bordo nelle liste ordini, stessa regola per lavanderia e cliente:
+// blu = nuovo messaggio dall'altra parte, rosso = urgente (solo lavanderia),
+// verde = consegna programmata (solo bordo), grigio = normale.
+function orderListBorder(order, viewer) {
+  const last = (order.messages || [])[(order.messages || []).length - 1];
+  const otherSide = viewer === "staff" ? "client" : "staff";
+  if (order.status !== "consegnato" && last && last.sender === otherSide) {
+    return "border-blue-300 bg-blue-50/30";
+  }
+  if (viewer === "staff" && isUrgentOrder(order)) return "border-rose-300";
+  if (order.status === "programmato") return "border-emerald-400";
+  return "border-gray-200";
+}
+
 // Riga compatta per le liste ordini: solo data di consegna e struttura. Tocca per aprire i dettagli.
 function OrderCompactRow({ order, fallbackName, onOpen, borderClass = "border-gray-200" }) {
   const info = deliveryInfo(order);
@@ -902,9 +916,11 @@ function OrderCompactRow({ order, fallbackName, onOpen, borderClass = "border-gr
       className={`w-full text-left border rounded-2xl px-4 py-3 mb-3 flex items-center justify-between gap-3 ${borderClass}`}
     >
       <div className="min-w-0">
-        <div className="text-[11px] font-bold text-gray-400 uppercase">{info.label}</div>
+        <div className="text-[11px] font-bold text-gray-400 uppercase">
+          <span className="text-gray-700">Ordine #{order.id}</span> • {info.label}
+        </div>
         <div className="text-base font-bold text-gray-900">
-          📅 {info.date}
+          {info.date}
           {info.time && <span> • {info.time}</span>}
         </div>
         <div className="text-sm text-gray-600 truncate">📍 {order.addressLabel || fallbackName || "—"}</div>
@@ -949,13 +965,13 @@ function MarkReadyButton({ orderId, onMarkReady, className }) {
 
 function OrderRecentCard({ order, clientName, onOpenDetail }) {
   // Vista compatta: data di consegna + struttura. Tutte le azioni sono nei dettagli.
-  const border = hasClientMessage(order)
-    ? "border-blue-300 bg-blue-50/30"
-    : isUrgentOrder(order)
-    ? "border-rose-300"
-    : "border-gray-200";
   return (
-    <OrderCompactRow order={order} fallbackName={clientName} onOpen={onOpenDetail} borderClass={border} />
+    <OrderCompactRow
+      order={order}
+      fallbackName={clientName}
+      onOpen={onOpenDetail}
+      borderClass={orderListBorder(order, "staff")}
+    />
   );
 }
 
@@ -4103,7 +4119,7 @@ function ClienteOrderCard({
       {hasStaffPing && !showChat && (
         <button
           onClick={() => setShowChat(true)}
-          className="mt-3 w-full bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold rounded-xl p-3 text-left"
+          className="mt-3 w-full bg-blue-50 border border-blue-200 text-blue-700 text-sm font-semibold rounded-xl p-3 text-left"
         >
           🔔 La lavanderia ti ha scritto riguardo a questo ordine — tocca per rispondere
         </button>
@@ -5447,13 +5463,7 @@ function ClienteDashboard({ data, client, actions }) {
             order={o}
             fallbackName={client.name}
             onOpen={setDetailOrderId}
-            borderClass={
-              (o.messages || []).length > 0 &&
-              o.status !== "consegnato" &&
-              o.messages[o.messages.length - 1].sender === "staff"
-                ? "border-amber-300 bg-amber-50/40"
-                : "border-gray-200"
-            }
+            borderClass={orderListBorder(o, "client")}
           />
         ))}
       </div>
@@ -5543,13 +5553,7 @@ function ClienteDashboard({ data, client, actions }) {
             order={o}
             fallbackName={client.name}
             onOpen={setDetailOrderId}
-            borderClass={
-              (o.messages || []).length > 0 &&
-              o.status !== "consegnato" &&
-              o.messages[o.messages.length - 1].sender === "staff"
-                ? "border-amber-300 bg-amber-50/40"
-                : "border-gray-200"
-            }
+            borderClass={orderListBorder(o, "client")}
           />
         ))}
       </div>

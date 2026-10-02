@@ -602,7 +602,27 @@ export async function unscheduleOrder(orderId) {
 }
 
 export async function markReady(orderId) {
-  await neon.from("orders").update({ status: "pronto" }).eq("id", orderId);
+  try {
+    const { data, error } = await neon
+      .from("orders")
+      .update({ status: "pronto" })
+      .eq("id", orderId)
+      .select("id, status");
+    if (error) {
+      console.error("markReady error:", error);
+      return { ok: false, error: "Non ho potuto segnare l'ordine come pronto: " + error.message };
+    }
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: "L'ordine non è stato aggiornato (nessuna riga modificata: controlla i permessi sul database).",
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("markReady error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
 }
 
 export async function markDelivered(orderId) {

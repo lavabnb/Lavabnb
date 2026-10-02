@@ -6,6 +6,25 @@ function formatIT(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Stessa regola dell'app: una fascia "15:00" vale dalle 15:00 alle 16:00.
+function scheduleChange(slots, date, time) {
+  if (!slots || slots.length === 0 || !date) return null;
+  const toMin = (t) => {
+    if (!t) return null;
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + (m || 0);
+  };
+  const t = toMin(time);
+  const inBand = (s) => {
+    const start = toMin(s.time);
+    return t !== null && start !== null && t >= start && t < start + 60;
+  };
+  if (slots.some((s) => s.date === date && inBand(s))) return null;
+  if (slots.some((s) => s.date === date)) return "orario";
+  if (slots.some((s) => inBand(s))) return "data";
+  return "data e orario";
+}
+
 function translateAuthError(msg) {
   if (!msg) return "Si è verificato un errore. Riprova.";
   const m = msg.toLowerCase();
@@ -576,13 +595,19 @@ export async function scheduleOrder(orderId, date, time) {
       .from("order_slots")
       .select("slot_date, slot_time")
       .eq("order_id", orderId);
-    const requested = slotRows || [];
-    const matches =
-      requested.length === 0 ||
-      requested.some((s) => s.slot_date === date && s.slot_time && s.slot_time.slice(0, 5) === time);
-    const message = matches
-      ? `Il tuo ordine #${orderId} è stato programmato per il ${formatIT(date)} alle ${time}.`
-      : `Il tuo ordine #${orderId} è stato programmato per il ${formatIT(date)} alle ${time} — orario diverso da quello che avevi richiesto. Scrivici nei messaggi dell'ordine se hai bisogno di riparlarne.`;
+    const requested = (slotRows || []).map((r) => ({
+      date: r.slot_date,
+      time: r.slot_time ? r.slot_time.slice(0, 5) : "",
+    }));
+    const change = scheduleChange(requested, date, time);
+    const when = `${formatIT(date)} alle ${time}`;
+    const message = !change
+      ? `Il tuo ordine #${orderId} è stato programmato per il ${when}.`
+      : `⚠️ ATTENZIONE: per l'ordine #${orderId} la lavanderia ha modificato ${
+          change === "data e orario" ? "data e orario" : change === "data" ? "la data" : "l'orario"
+        } di consegna. Nuova consegna: ${when} (avevi richiesto ${requested
+          .map((s) => `${formatIT(s.date)} ${s.time}`)
+          .join(" / ")}). Scrivici nei messaggi dell'ordine se hai bisogno di riparlarne.`;
     await addNotification(clientId, message);
   }
 }

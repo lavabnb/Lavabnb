@@ -896,6 +896,77 @@ export async function applyReturnsToOrder(returnIds, orderId) {
   }
 }
 
+// ---------------- Modifica indirizzo ordine (cliente) ----------------
+// Il cliente può cambiare l'indirizzo finché la consegna non è programmata.
+// La sicurezza vera è nel database (RLS + trigger): qui c'è solo il controllo "gentile".
+const ADDRESS_EDITABLE_STATUSES = ["nuovo", "pronto"];
+
+export async function updateOrderAddress(orderId, fields) {
+  try {
+    const label = (fields.label || "").trim();
+    const address = (fields.address || "").trim();
+    if (!label) return { ok: false, error: "Inserisci il nome della struttura." };
+    if (address.length < 6) {
+      return { ok: false, error: "Inserisci l'indirizzo completo (via, numero civico e città)." };
+    }
+
+    const { data: rows, error: readErr } = await neon
+      .from("orders")
+      .select("id, client_id, status")
+      .eq("id", orderId);
+    if (readErr) return { ok: false, error: "Non ho potuto leggere l'ordine: " + readErr.message };
+    const current = rows && rows[0];
+    if (!current) return { ok: false, error: "Ordine non trovato." };
+    if (!ADDRESS_EDITABLE_STATUSES.includes(current.status)) {
+      return {
+        ok: false,
+        error:
+          "La consegna è già stata programmata: l'indirizzo non è più modificabile. Scrivi alla lavanderia nei messaggi dell'ordine.",
+      };
+    }
+
+    const { data, error } = await neon
+      .from("orders")
+      .update({
+        address_id: fields.addressId || null,
+        address_label: label,
+        address_snapshot: address,
+        address_intercom: (fields.intercom || "").trim(),
+        address_floor: (fields.floor || "").trim(),
+        address_unit: (fields.unit || "").trim(),
+        address_notes: (fields.notes || "").trim(),
+      })
+      .eq("id", orderId)
+      .in("status", ADDRESS_EDITABLE_STATUSES)
+      .select("id");
+    if (error) return { ok: false, error: "Non ho potuto salvare l'indirizzo: " + error.message };
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error:
+          "L'indirizzo non è stato aggiornato (ordine non modificabile o permessi mancanti). Riprova o scrivi alla lavanderia.",
+      };
+    }
+
+    // Avviso la lavanderia nella chat dell'ordine (così compare come nuovo messaggio del cliente)
+    const msg = `📍 Ho modificato l'indirizzo di consegna: ${label} — ${address}`;
+    const { error: msgErr } = await neon
+      .from("order_messages")
+      .insert([{ order_id: orderId, sender: "client", message: msg }]);
+    if (msgErr) console.error("updateOrderAddress message error:", msgErr);
+    await addNotification(
+      current.client_id,
+      `Il cliente ha modificato l'indirizzo di consegna dell'ordine #${orderId}: ${label} — ${address}`,
+      "staff"
+    );
+
+    return { ok: true };
+  } catch (e) {
+    console.error("updateOrderAddress error:", e);
+    return { ok: false, error: "Errore: " + (e.message || String(e)) };
+  }
+}
+
 export async function setOrderNote(orderId, note) {
   await neon.from("orders").update({ note }).eq("id", orderId);
 }

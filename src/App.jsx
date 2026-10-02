@@ -24,18 +24,35 @@ import {
 import * as api from "./api";
 
 // ---------- Date helpers ----------
+// Nota: le date sono sempre gestite come data LOCALE (ora italiana).
+// toISOString() convertirebbe in UTC e, in Italia, sposterebbe la data al giorno prima.
+function localISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 function isoToday() {
-  return new Date().toISOString().slice(0, 10);
+  return localISO(new Date());
 }
 function addDaysISO(iso, n) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 function formatIT(iso) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
+}
+// "09:00" -> "09:00–10:00" (le fasce scelte dal cliente sono di un'ora)
+function formatSlotTime(time) {
+  if (!time) return "—";
+  const [h, m] = time.split(":");
+  if (m !== "00") return time;
+  return `${time}–${String(parseInt(h, 10) + 1).padStart(2, "0")}:00`;
+}
+// L'indirizzo è modificabile dal cliente finché la consegna non è stata programmata.
+const ADDRESS_EDITABLE_STATUSES = ["nuovo", "pronto"];
+function canClientEditAddress(order) {
+  return ADDRESS_EDITABLE_STATUSES.includes(order.status);
 }
 function toNumber(str) {
   if (typeof str !== "string") return Number(str) || 0;
@@ -1217,10 +1234,9 @@ function OrderDetailAdminScreen({
         </div>
       )}
 
-      {order.status === "nuovo" && order.preferredSlots && order.preferredSlots.length > 0 && (
-        <div className="border border-gray-200 rounded-xl px-4 py-3 mb-5 text-sm text-gray-600">
-          Orari richiesti dal cliente:{" "}
-          {order.preferredSlots.map((s) => `${formatIT(s.date)} ${s.time}`).join(" / ")}
+      {order.preferredSlots && order.preferredSlots.length > 0 && (
+        <div className="-mt-3 mb-5">
+          <RequestedSlotsBox order={order} title="Data e orario richiesti dal cliente" />
         </div>
       )}
 
@@ -3555,7 +3571,144 @@ function OrderChat({ order, sender, onSend, readOnly }) {
   );
 }
 
-function ClienteOrderCard({ order, onSendMessage, returns }) {
+// ---------- Dettagli ordine: data/orario richiesti e indirizzo ----------
+function RequestedSlotsBox({ order, title = "Data e orario richiesti" }) {
+  const slots = order.preferredSlots || [];
+  if (slots.length === 0) return null;
+  return (
+    <div className="mt-3 border border-gray-200 rounded-xl px-3 py-2.5">
+      <div className="text-[11px] font-bold text-gray-400 uppercase mb-1">{title}</div>
+      {slots.map((s, i) => (
+        <div key={i} className="text-sm text-gray-700 flex flex-wrap gap-x-4">
+          <span>
+            Data richiesta: <b>{formatIT(s.date)}</b>
+          </span>
+          <span>
+            Orario: <b>{formatSlotTime(s.time)}</b>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrderAddressDetails({ order }) {
+  if (!order.addressSnapshot && !order.addressLabel) {
+    return <div className="text-sm text-gray-400">Nessun indirizzo indicato.</div>;
+  }
+  const extra = [
+    order.addressFloor && `Piano ${order.addressFloor}`,
+    order.addressUnit && `Interno ${order.addressUnit}`,
+    order.addressIntercom && `Citofono: ${order.addressIntercom}`,
+  ].filter(Boolean);
+  return (
+    <>
+      {order.addressLabel && (
+        <div className="text-sm font-semibold text-gray-900">{order.addressLabel}</div>
+      )}
+      {order.addressSnapshot && <div className="text-sm text-gray-600">{order.addressSnapshot}</div>}
+      {extra.length > 0 && <div className="text-xs text-gray-400 mt-0.5">{extra.join(" • ")}</div>}
+      {order.addressNotes && <div className="text-xs text-gray-400 mt-1">{order.addressNotes}</div>}
+    </>
+  );
+}
+
+function ClientOrderAddressSection({ order, addresses, onUpdateAddress }) {
+  const [editing, setEditing] = useState(false);
+  const [success, setSuccess] = useState("");
+  // Permette di precompilare il form con una delle strutture salvate
+  const [prefill, setPrefill] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+  const editable = canClientEditAddress(order);
+  const isConsegnato = order.status === "consegnato";
+
+  const currentAsInitial = {
+    label: order.addressLabel,
+    address: order.addressSnapshot,
+    intercom: order.addressIntercom,
+    floor: order.addressFloor,
+    unit: order.addressUnit,
+    notes: order.addressNotes,
+  };
+
+  return (
+    <div className="mt-3 border border-gray-200 rounded-xl px-3 py-2.5">
+      <div className="text-[11px] font-bold text-gray-400 uppercase mb-1">Indirizzo di consegna</div>
+
+      {success && !editing && (
+        <div className="mb-2 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs rounded-lg p-2 font-medium">
+          ✅ {success}
+        </div>
+      )}
+
+      {!editing ? (
+        <>
+          <OrderAddressDetails order={order} />
+          {editable && onUpdateAddress && (
+            <button
+              onClick={() => {
+                setSuccess("");
+                setPrefill(null);
+                setFormKey((k) => k + 1);
+                setEditing(true);
+              }}
+              className="mt-2 text-xs font-semibold text-gray-700 border border-gray-300 rounded-full px-3 py-1"
+            >
+              ✏️ Modifica indirizzo
+            </button>
+          )}
+          {!editable && !isConsegnato && (
+            <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">
+              La consegna è già stata programmata, quindi l'indirizzo non è più modificabile
+              dall'app. Se c'è un errore, scrivi alla lavanderia nei messaggi di questo ordine.
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {addresses && addresses.length > 0 && (
+            <select
+              value={prefill ?? ""}
+              onChange={(e) => {
+                const v = e.target.value ? Number(e.target.value) : null;
+                setPrefill(v);
+                setFormKey((k) => k + 1);
+              }}
+              className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm mb-2"
+            >
+              <option value="">Modifica l'indirizzo attuale</option>
+              {addresses.map((a) => (
+                <option key={a.id} value={a.id}>
+                  Usa: {a.label} — {a.address}
+                </option>
+              ))}
+            </select>
+          )}
+          <AddressForm
+            key={formKey}
+            initial={addresses?.find((a) => a.id === prefill) || currentAsInitial}
+            hideDefault
+            saveLabel="Salva indirizzo"
+            onSave={async (fields) => {
+              const res = await onUpdateAddress(order.id, {
+                ...fields,
+                addressId: prefill || order.addressId || null,
+              });
+              if (res && res.ok) {
+                setEditing(false);
+                setSuccess("Indirizzo di consegna aggiornato correttamente.");
+              }
+              return res;
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ClienteOrderCard({ order, onSendMessage, returns, addresses, onUpdateAddress }) {
   const [showChat, setShowChat] = useState(false);
   const [showItems, setShowItems] = useState(false);
   const messages = order.messages || [];
@@ -3578,9 +3731,6 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
           🏭 Inserito dalla lavanderia
         </div>
       )}
-      {order.addressLabel && (
-        <div className="text-xs text-gray-400 mt-0.5">📍 {order.addressLabel}</div>
-      )}
       {order.deliveryFee > 0 && (
         <div className="text-xs text-gray-400 mt-0.5">
           Include consegna: €{order.deliveryFee.toFixed(2)}
@@ -3591,6 +3741,13 @@ function ClienteOrderCard({ order, onSendMessage, returns }) {
           + IVA 22% (€{(order.total * 0.22).toFixed(2)}) = €{(order.total * 1.22).toFixed(2)} totale
         </div>
       )}
+
+      <RequestedSlotsBox order={order} />
+      <ClientOrderAddressSection
+        order={order}
+        addresses={addresses}
+        onUpdateAddress={onUpdateAddress}
+      />
 
       {appliedCredits.length > 0 && (
         <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-lg p-2 text-xs text-emerald-700">
@@ -4244,7 +4401,7 @@ function AuthScreen({ onLogin, onRegister, onAdminSignup, onRequestPasswordReset
   );
 }
 
-function AddressForm({ initial, onSave, onCancel }) {
+function AddressForm({ initial, onSave, onCancel, hideDefault = false, saveLabel = "Salva" }) {
   const [label, setLabel] = useState(initial?.label || "");
   const [address, setAddress] = useState(initial?.address || "");
   const [intercom, setIntercom] = useState(initial?.intercom || "");
@@ -4321,6 +4478,7 @@ function AddressForm({ initial, onSave, onCancel }) {
         rows={2}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
       />
+      {!hideDefault && (
       <label className="flex items-center gap-2 mb-3 select-none">
         <input
           type="checkbox"
@@ -4330,13 +4488,14 @@ function AddressForm({ initial, onSave, onCancel }) {
         />
         <span className="text-sm text-gray-600">Usa come struttura predefinita</span>
       </label>
+      )}
       <div className="flex gap-2">
         <button
           disabled={busy}
           onClick={submit}
           className="flex-1 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg py-2 text-sm font-semibold"
         >
-          Salva
+          {busy ? "Salvataggio..." : saveLabel}
         </button>
         <button
           onClick={onCancel}
@@ -4955,7 +5114,14 @@ function ClienteDashboard({ data, client, actions }) {
           <p className="text-gray-400 text-sm py-8 text-center">Nessun ordine ancora.</p>
         )}
         {myOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} returns={data.returns} />
+          <ClienteOrderCard
+            key={o.id}
+            order={o}
+            onSendMessage={actions.sendOrderMessage}
+            returns={data.returns}
+            addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
+            onUpdateAddress={actions.updateOrderAddress}
+          />
         ))}
       </div>
     );
@@ -5035,7 +5201,14 @@ function ClienteDashboard({ data, client, actions }) {
           </p>
         )}
         {activeOrders.map((o) => (
-          <ClienteOrderCard key={o.id} order={o} onSendMessage={actions.sendOrderMessage} returns={data.returns} />
+          <ClienteOrderCard
+            key={o.id}
+            order={o}
+            onSendMessage={actions.sendOrderMessage}
+            returns={data.returns}
+            addresses={(data.addresses || []).filter((a) => a.clientId === client.id)}
+            onUpdateAddress={actions.updateOrderAddress}
+          />
         ))}
       </div>
 
@@ -5214,6 +5387,11 @@ export default function App() {
     },
     createAddress: async (clientId, fields) => {
       const res = await api.createAddress(clientId, fields);
+      await refresh();
+      return res;
+    },
+    updateOrderAddress: async (orderId, fields) => {
+      const res = await api.updateOrderAddress(orderId, fields);
       await refresh();
       return res;
     },

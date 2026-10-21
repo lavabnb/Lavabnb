@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "./api";
-import RfidTestScreen, { RfidEntryButton } from "./rfid/RfidTestScreen.jsx";
+import BiancheriaRfidScreen, { RfidNavIcon } from "./rfid/BiancheriaRfidScreen.jsx";
 
 // ---------- Date helpers ----------
 // Nota: le date sono sempre gestite come data LOCALE (ora italiana).
@@ -1685,7 +1685,6 @@ function DashboardScreen({
   onNewOrder,
   onLogout,
   onMarkReturnSeen,
-  onOpenRfid,
 }) {
   const clientName = (id) => getClientName(clients, id);
   const today = isoToday();
@@ -1733,8 +1732,6 @@ function DashboardScreen({
       >
         <Plus size={16} /> Nuovo Ordine per un cliente
       </button>
-
-      {onOpenRfid && <RfidEntryButton onClick={onOpenRfid} />}
 
       <div className="flex gap-4 mb-5">
         <StatCard
@@ -3037,33 +3034,14 @@ function LavanderiaView({ data, actions }) {
   const [clientDetailId, setClientDetailId] = useState(null);
   const [detailOrderId, setDetailOrderId] = useState(null);
   const [creatingOrder, setCreatingOrder] = useState(false);
-  const [rfidOpen, setRfidOpen] = useState(false);
 
   const navItems = [
     { key: "dashboard", label: "Dashboard", icon: <Home size={18} /> },
     { key: "clienti", label: "Clienti", icon: <Users size={18} /> },
     { key: "calendario", label: "Calendario", icon: <CalendarIcon size={18} /> },
     { key: "statistiche", label: "Statistiche", icon: <BarChart3 size={18} /> },
+    { key: "rfid", label: "Biancheria", icon: <RfidNavIcon /> },
   ];
-
-  if (rfidOpen) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 overflow-y-auto">
-          <RfidTestScreen onBack={() => setRfidOpen(false)} />
-        </div>
-        <BottomNav
-          items={navItems}
-          active={nav}
-          onChange={(k) => {
-            setRfidOpen(false);
-            setNav(k);
-            setClientDetailId(null);
-          }}
-        />
-      </div>
-    );
-  }
 
   if (creatingOrder) {
     return (
@@ -3159,7 +3137,6 @@ function LavanderiaView({ data, actions }) {
         onNewOrder={() => setCreatingOrder(true)}
         onLogout={actions.logout}
         onMarkReturnSeen={actions.markReturnSeen}
-        onOpenRfid={() => setRfidOpen(true)}
       />
     );
   } else if (nav === "archivio") {
@@ -3234,6 +3211,8 @@ function LavanderiaView({ data, actions }) {
         onDeleteReturn={actions.deleteReturn}
       />
     );
+  } else if (nav === "rfid") {
+    content = <BiancheriaRfidScreen clients={data.clients} orders={data.orders} />;
   }
 
   return (

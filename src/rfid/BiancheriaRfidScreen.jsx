@@ -109,6 +109,7 @@ export default function BiancheriaRfidScreen({ clients, orders }) {
           ) : (
             loadErr.error
           )}
+          {loadErr.setupNeeded && loadErr.error && <p className="text-xs mt-2 font-mono break-all opacity-80">Dettaglio: {loadErr.error}</p>}
           <button onClick={refresh} className="block mt-2 font-semibold underline">Riprova</button>
         </div>
       )}

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import * as api from "./api";
 import BiancheriaRfidScreen, { RfidNavIcon } from "./rfid/BiancheriaRfidScreen.jsx";
+import * as rfidApi from "./rfid/rfidApi";
 
 // ---------- Date helpers ----------
 // Nota: le date sono sempre gestite come data LOCALE (ora italiana).
@@ -5592,6 +5593,19 @@ function ClienteView({ data, client, actions }) {
 // ================= APP ROOT =================
 export default function App() {
   const [authUser, setAuthUser] = useState(undefined); // undefined = in caricamento, null = non loggato
+  // Ruolo RFID dal database: undefined = in verifica, "operatore" = accesso solo alla Biancheria RFID
+  const [rfidRole, setRfidRole] = useState(undefined);
+  useEffect(() => {
+    if (!authUser) {
+      setRfidRole(undefined);
+      return undefined;
+    }
+    let alive = true;
+    rfidApi.whoami().then((r) => alive && setRfidRole(r.ok ? r.role : null));
+    return () => {
+      alive = false;
+    };
+  }, [authUser]);
   const [data, setData] = useState(null);
 
   const refresh = useCallback(async () => {
@@ -5840,6 +5854,26 @@ export default function App() {
             onRequestPasswordReset={actions.requestPasswordReset}
             onResetPassword={actions.resetPassword}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (rfidRole === undefined) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 className="animate-spin text-gray-400" size={28} />
+      </div>
+    );
+  }
+
+  if (rfidRole === "operatore") {
+    return (
+      <div className="min-h-screen bg-gray-100 flex justify-center py-6 px-3">
+        <div className="w-full max-w-md bg-white rounded-[2rem] shadow-sm border border-gray-100 flex flex-col h-[820px] overflow-hidden">
+          <div className="flex-1 overflow-y-auto">
+            <BiancheriaRfidScreen mode="operatore" onLogout={actions.logout} />
+          </div>
         </div>
       </div>
     );
